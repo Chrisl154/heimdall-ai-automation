@@ -41,6 +41,11 @@ tasks/completed/
 *.log
 data/logs/
 
+# AI tool working directories (may contain API keys / session state)
+.roo/
+.continue/
+.cline/
+
 # AI tool state (generated, not project config)
 entities.json
 mempalace.json
