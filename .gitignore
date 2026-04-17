@@ -49,3 +49,4 @@ data/logs/
 # AI tool state (generated, not project config)
 entities.json
 mempalace.json
+.mempalace/
