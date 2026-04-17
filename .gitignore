@@ -1,0 +1,42 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+data/vault.enc
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node / Next.js
+node_modules/
+.next/
+frontend/out/
+frontend/.turbo/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Workspace outputs (generated — not source)
+workspace/current/*/
+workspace/reviews/*/
+!workspace/current/.gitkeep
+!workspace/reviews/.gitkeep
+
+# Task completions (generated)
+tasks/completed/
+
+# Logs
+*.log
+data/logs/

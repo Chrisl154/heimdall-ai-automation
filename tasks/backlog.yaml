@@ -1,0 +1,270 @@
+# Heimdall Task Backlog
+# Root is an array of task objects.
+# Streams:
+#   stream: claude  — written by Claude (core orchestration, security)
+#   stream: qwen    — written by Qwen, reviewed by Claude
+#
+# Status: pending | in_progress | in_review | fixing | completed | failed | escalated
+
+- id: qwen-001
+  title: "Implement LLM provider API callers"
+  stream: qwen
+  description: |
+    Implement backend/core/llm_providers.py
+
+    Export one async function:
+      async def call_llm(
+          prompt: str,
+          system: str,
+          model: str,
+          provider: str,
+          base_url: str | None,
+          api_key: str | None,
+          temperature: float,
+          max_tokens: int,
+          history: list[dict] | None = None,
+      ) -> str
+
+    Also export: class LLMError(Exception)
+
+    Supported providers:
+      "anthropic"     — POST https://api.anthropic.com/v1/messages
+                        Headers: x-api-key, anthropic-version: 2023-06-01
+                        Body: {model, max_tokens, system, messages}
+                        Return: content[0].text
+
+      "ollama"        — POST {base_url}/api/chat
+                        Body: {model, messages:[system+user], stream:false}
+                        Return: message.content
+
+      "lmstudio"      — POST {base_url}/v1/chat/completions (OpenAI format)
+                        Return: choices[0].message.content
+
+      "openai"        — POST https://api.openai.com/v1/chat/completions
+                        Bearer auth
+                        Return: choices[0].message.content
+
+      "openai_compat" — Same as openai but use base_url
+                        Return: choices[0].message.content
+
+    Requirements:
+      - 5-attempt exponential backoff (5, 10, 20, 40, 80 s) for 429/5xx
+      - Raise LLMError on final failure — never return error strings silently
+      - Include history in messages when provided
+      - Use httpx only (no SDKs except anthropic SDK is allowed)
+      - Full type annotations
+
+    Output: workspace/current/qwen-001/llm_providers.py
+  priority: high
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python", "llm"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-001"
+
+- id: qwen-002
+  title: "Implement YAML task manager"
+  stream: qwen
+  description: |
+    Implement backend/core/task_manager.py
+
+    Class TaskManager:
+      __init__(self, tasks_dir: str = "tasks")
+        Load backlog from tasks_dir/backlog.yaml on init.
+
+      get_next_task(self) -> Task | None
+        Returns first pending Task whose depends_on tasks are all completed.
+
+      mark_in_progress(self, task_id: str) -> None   (set started_at)
+      mark_in_review(self, task_id: str) -> None
+      mark_fixing(self, task_id: str) -> None
+      mark_completed(self, task_id: str, output: str) -> None
+        Write output to tasks_dir/completed/<task_id>.md, update status + completed_at.
+      mark_failed(self, task_id: str, error: str) -> None
+      mark_escalated(self, task_id: str, reason: str) -> None
+
+      get_task(self, task_id: str) -> Task | None
+      list_tasks(self) -> list[Task]
+      set_iteration(self, task_id: str, n: int) -> None
+      set_latest_output(self, task_id: str, output: str) -> None
+      set_latest_review(self, task_id: str, review: ReviewResult) -> None
+
+    Notes:
+      - In-memory dict, flushed to disk on every mutation
+      - asyncio.Lock for thread safety
+      - Import Task, TaskStatus, ReviewResult from core.models
+
+    Output: workspace/current/qwen-002/task_manager.py
+  priority: high
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-002"
+
+- id: qwen-003
+  title: "Implement Telegram messaging adapter"
+  stream: qwen
+  description: |
+    Implement backend/core/messaging/adapters/telegram.py
+
+    Class TelegramAdapter(MessagingAdapter) from core.messaging.base:
+      __init__(self, channel: MessagingChannel, on_message_cb)
+        channel.credentials["bot_token"] required.
+        channel.targets: allowed chat_id strings.
+        on_message_cb: async (chat_id, text, user_id) -> str
+
+      async start(self) -> None
+        Start long-polling via python-telegram-bot Application.
+        Commands: /start /help /status /tasks /stop
+        Plain text: forward to on_message_cb.
+        Ignore messages from chat_ids NOT in channel.targets.
+
+      async stop(self) -> None
+
+      async send_message(self, target: str, text: str) -> None
+        Send MarkdownV2 message. Escape special chars.
+
+    Output: workspace/current/qwen-003/telegram.py
+  priority: medium
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python", "messaging"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-003"
+
+- id: qwen-004
+  title: "Implement Discord messaging adapter"
+  stream: qwen
+  description: |
+    Implement backend/core/messaging/adapters/discord.py
+
+    Class DiscordAdapter(MessagingAdapter):
+      __init__(self, channel: MessagingChannel, on_message_cb)
+        channel.credentials["bot_token"] required.
+        channel.targets: allowed channel_id strings.
+
+      async start(self) -> None
+        Start discord.py Client.
+        Respond to !status !tasks !stop !help and plain messages
+        in channels listed in channel.targets.
+
+      async stop(self) -> None
+
+      async send_message(self, target: str, text: str) -> None
+        Post to Discord channel id=target. Split at 2000 chars if needed.
+
+    Output: workspace/current/qwen-004/discord.py
+  priority: medium
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python", "messaging"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-004"
+
+- id: qwen-005
+  title: "Implement Email adapter (SMTP outbound + IMAP inbound)"
+  stream: qwen
+  description: |
+    Implement backend/core/messaging/adapters/email_adapter.py
+
+    Class EmailAdapter(MessagingAdapter):
+      __init__(self, channel: MessagingChannel, on_message_cb)
+        channel.credentials keys:
+          smtp_host, smtp_port, smtp_user, smtp_password,
+          imap_host, imap_port, imap_user, imap_password,
+          from_address, command_subject_prefix
+        channel.targets: list of recipient email addresses.
+
+      async start(self) -> None
+        Begin background IMAP polling every 30 s.
+        Match subjects starting with command_subject_prefix.
+        Call on_message_cb(sender, subject, body) and reply with result.
+
+      async stop(self) -> None
+
+      async send_message(self, target: str, text: str) -> None
+        Send via aiosmtplib. Subject "[Heimdall] Status Update".
+        Wrap text in minimal HTML template.
+
+    Output: workspace/current/qwen-005/email_adapter.py
+  priority: medium
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python", "messaging"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-005"
+
+- id: qwen-006
+  title: "Implement git integration helper"
+  stream: qwen
+  description: |
+    Implement backend/core/git_integration.py
+
+    Class GitManager:
+      __init__(self, repo_path: str = ".")
+        Open git.Repo at repo_path.
+
+      get_status(self) -> dict
+        Return {branch, clean, staged: list[str], unstaged: list[str]}
+
+      commit_task_output(self, task_id: str, output_path: str, message: str) -> str
+        Stage all files in output_path, commit, return commit sha.
+
+      create_branch(self, name: str) -> None
+      get_current_branch(self) -> str
+
+      push(self, remote: str = "origin", branch: str | None = None) -> None
+        Never force-push. Raise GitError if blocked.
+
+      create_github_pr(self, title, body, head, base, token, repo) -> str
+        Use PyGithub. Return PR URL.
+
+      get_recent_commits(self, n: int = 10) -> list[dict]
+        Return [{sha, message, author, date}]
+
+    Export: class GitError(Exception)
+    Use gitpython. No force-push allowed.
+
+    Output: workspace/current/qwen-006/git_integration.py
+  priority: medium
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["backend", "python", "git"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-006"
+
+- id: qwen-007
+  title: "Frontend: Settings & Vault management page"
+  stream: qwen
+  description: |
+    Implement frontend/src/app/settings/page.tsx
+
+    Tabs: Providers | Channels | Restrictions
+
+    Providers tab:
+      Card per agent (PM, Worker, Reviewer, Auxiliary).
+      Editable: model, base_url.
+      Masked API key input → POST /api/vault/{key_name} on Save.
+      Lock icon: green if key exists in vault, grey if missing (GET /api/vault/keys).
+
+    Channels tab:
+      List channels from GET /api/messaging/channels.
+      Enable/Disable toggle (PATCH /api/messaging/channels/{id}).
+      Add Channel modal: type selector + credential fields.
+      Credentials POST /api/vault/{channel_id}_{field}.
+
+    Restrictions tab:
+      Monaco editor (read-only by default) showing restrictions.yaml.
+      Edit/Save buttons → PATCH /api/restrictions.
+
+    Use shadcn/ui: Card, Tabs, Input, Button, Badge, Switch.
+    Use API client from src/lib/api.ts.
+
+    Output: workspace/current/qwen-007/settings/page.tsx
+  priority: medium
+  status: pending
+  created_at: "2026-04-16"
+  tags: ["frontend", "react", "typescript"]
+  max_review_iterations: 3
+  output_path: "workspace/current/qwen-007"

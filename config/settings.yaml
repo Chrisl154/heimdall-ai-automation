@@ -1,0 +1,110 @@
+# Heimdall AI Automation — Main Configuration
+#
+# Provider assignments:
+#   pm (orchestrator) → Gemma via LM Studio (local)
+#   worker            → Qwen via Ollama (local)
+#   reviewer          → Claude via Anthropic API (cloud)
+#   auxiliary         → Codex / Copilot (cloud, optional)
+#
+# ALL API keys and tokens are stored encrypted in the vault.
+# Use the /vault API or the GUI Settings page to add them.
+
+pm:
+  name: "Heimdall"
+  poll_interval: 15          # seconds to wait when task queue is empty
+  max_concurrent_tasks: 1    # run one task at a time (safe default)
+  auto_commit: true          # commit completed outputs to git
+  auto_push: false           # push to remote after commit
+  git_branch: "main"
+
+agents:
+  # ─── Worker: Qwen via Ollama (local) ───────────────────────────────────────
+  worker:
+    name: "Qwen Worker"
+    model: "qwen2.5-coder:7b"   # ollama pull qwen2.5-coder:7b
+    provider: "ollama"
+    base_url: "http://127.0.0.1:11434"
+    temperature: 0.3
+    max_tokens: 8192
+    system_prompt: |
+      You are a highly skilled software developer. Your PM will assign you tasks.
+      Complete each task precisely and output clean, working code.
+      Follow the coding language/framework specified in the task.
+      When you receive a review with feedback, fix EVERY issue listed — nothing else.
+      Output all files to the directory specified in the task.
+
+  # ─── Reviewer: Claude via Anthropic API (cloud) ────────────────────────────
+  reviewer:
+    name: "Claude Reviewer"
+    model: "claude-sonnet-4-6"
+    provider: "anthropic"
+    temperature: 0.1
+    max_tokens: 4096
+    system_prompt: |
+      You are a senior software engineer performing a rigorous code review.
+      Evaluate: correctness, security, edge-case handling, code quality,
+      and adherence to the task requirements.
+
+      Respond ONLY with valid JSON in this exact shape — no markdown fences:
+      {
+        "approved": true | false,
+        "summary": "one-line summary of your decision",
+        "issues": [
+          {"severity": "critical|major|minor", "description": "...", "location": "file:line or general"}
+        ],
+        "feedback": "full review notes for the worker to act on"
+      }
+
+      Set "approved": true only when ALL critical and major issues are resolved.
+
+  # ─── PM / Orchestrator: Gemma via LM Studio (local) ───────────────────────
+  orchestrator:
+    name: "Heimdall PM"
+    model: "gemma-3-12b-it"    # load this model in LM Studio
+    provider: "lmstudio"
+    base_url: "http://127.0.0.1:1234"
+    temperature: 0.2
+    max_tokens: 2048
+    system_prompt: |
+      You are Heimdall, an AI Project Manager. You orchestrate a pipeline:
+        1. Assign tasks to the Qwen worker AI
+        2. Coordinate code reviews with the Claude reviewer
+        3. Relay review feedback back to Qwen for fixes
+        4. Close tasks when Claude approves, then move to the next
+        5. Escalate to a human when a task exceeds its iteration limit
+      Communicate clearly and professionally. Keep status updates concise.
+
+  # ─── Auxiliary: Codex / Copilot (cloud, disabled by default) ──────────────
+  auxiliary:
+    name: "Codex / Copilot"
+    model: "gpt-4o"            # or "gpt-4.1", "o4-mini", etc.
+    provider: "openai"
+    temperature: 0.3
+    max_tokens: 4096
+    enabled: false
+    system_prompt: |
+      You are a helpful assistant supporting the Heimdall pipeline.
+
+notifications:
+  on_task_start: true
+  on_task_complete: true
+  on_review_failed: true
+  on_review_approved: true
+  on_error: true
+  on_escalation: true
+  on_pm_start: true
+  on_pm_stop: true
+
+git:
+  enabled: true
+  commit_prefix: "[Heimdall]"
+  branch_per_task: false     # create feature/<task-id> branches per task
+  create_pr: false           # open a GitHub PR when branch_per_task = true
+  pr_base_branch: "main"
+  sign_commits: false
+
+workspace:
+  base_path: "workspace"
+  current_path: "workspace/current"
+  reviews_path: "workspace/reviews"
+  cleanup_on_complete: false

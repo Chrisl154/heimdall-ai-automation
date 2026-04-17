@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: heimdall-backend
+    restart: unless-stopped
+    ports:
+      - "${HEIMDALL_PORT:-8000}:8000"
+    environment:
+      - HEIMDALL_VAULT_KEY=${HEIMDALL_VAULT_KEY}
+      - HEIMDALL_SECRET_KEY=${HEIMDALL_SECRET_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - LMSTUDIO_BASE_URL=${LMSTUDIO_BASE_URL:-http://host.docker.internal:1234}
+      - CORS_ORIGINS=http://localhost:3000,http://heimdall-frontend:3000
+    volumes:
+      - ./tasks:/app/tasks
+      - ./workspace:/app/workspace
+      - ./config:/app/config
+      - heimdall-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: heimdall-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  heimdall-data:

@@ -1,0 +1,87 @@
+# Heimdall — AI Agent Restrictions
+# These rules are enforced by the restrictions engine before any agent action.
+
+global:
+  # Paths the AI must never read or write
+  protected_paths:
+    - ".env"
+    - ".env.*"
+    - "config/secrets.*"
+    - "*.pem"
+    - "*.key"
+    - "*.pfx"
+    - ".git/"
+
+  # Shell-style patterns the system will refuse to execute or write to files
+  blocked_patterns:
+    - "rm -rf /"
+    - "DROP TABLE"
+    - "DROP DATABASE"
+    - "TRUNCATE TABLE"
+    - "DELETE FROM"          # blanket deletes — must use WHERE
+    - "format c:"
+    - "sudo rm"
+    - "> /dev/sda"
+
+  # Never commit files matching these globs
+  never_commit:
+    - "*.env"
+    - "*.key"
+    - "*.pem"
+    - "*secret*"
+    - "*password*"
+    - "*credential*"
+    - "*.sqlite"              # don't commit local dev databases
+
+worker_restrictions:
+  # Qwen cannot write outside these directories
+  write_allowed:
+    - "workspace/current/"
+    - "workspace/reviews/"   # can write fix attempts here
+
+  # Qwen cannot read these paths
+  read_restricted:
+    - "config/secrets.*"
+    - ".env"
+
+  # Maximum bytes Qwen can write per file
+  max_file_size: 2097152     # 2 MB
+
+  # Languages Qwen is permitted to generate
+  allowed_languages:
+    - python
+    - javascript
+    - typescript
+    - go
+    - rust
+    - bash
+    - sql
+    - yaml
+    - json
+    - markdown
+
+  # Qwen must not call external APIs unless the task explicitly allows it
+  allow_external_calls: false
+
+reviewer_restrictions:
+  # Reviewer is read-only except for review output files
+  write_allowed:
+    - "workspace/reviews/"
+
+  # Reviewer must always check these dimensions
+  must_evaluate:
+    - security
+    - correctness
+    - code_quality
+    - task_adherence
+
+pm_restrictions:
+  # PM escalates to human after this many total Qwen→Review cycles on one task
+  max_total_iterations_per_task: 10
+
+  # Auto-escalate if a task has been running for longer than this (hours)
+  escalate_after_hours: 24
+
+  # PM is allowed to create branches and commits but not force-push
+  git_force_push: false
+  git_delete_branches: false
