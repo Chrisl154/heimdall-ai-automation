@@ -1,0 +1,40 @@
+wing: aiautomation
+rooms:
+- name: backend
+  description: Files from backend/
+  keywords:
+  - backend
+  - backend
+- name: configuration
+  description: Files from config/
+  keywords:
+  - configuration
+  - config
+- name: data
+  description: Files from data/
+  keywords:
+  - data
+  - data
+- name: frontend
+  description: Files from frontend/
+  keywords:
+  - frontend
+  - frontend
+- name: tasks
+  description: Files from tasks/
+  keywords:
+  - tasks
+  - tasks
+- name: workspace
+  description: Files from workspace/
+  keywords:
+  - workspace
+  - workspace
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
