@@ -70,6 +70,20 @@ export const api = {
     status: () => request<GitStatus>("/api/git/status"),
     commits: (n = 10) => request<GitCommit[]>(`/api/git/commits?n=${n}`),
   },
+
+  workspace: {
+    files: (taskId: string) =>
+      request<{ task_id: string; files: string[] }>(`/api/workspace/${taskId}/files`),
+    file: (taskId: string, filename: string) =>
+      request<WorkspaceFile>(`/api/workspace/${taskId}/file/${filename}`),
+    diff: (taskId: string, fromFile: string, toFile: string) =>
+      request<WorkspaceDiff>(`/api/workspace/${taskId}/diff?from_file=${fromFile}&to_file=${toFile}`),
+  },
+
+  webhooks: {
+    list: () => request<{ webhooks: WebhookConfig[] }>("/api/webhooks"),
+    test: (index: number) => request<{ sent: boolean; url: string }>(`/api/webhooks/test/${index}`, { method: "POST" }),
+  },
 };
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
@@ -159,4 +173,25 @@ export interface GitCommit {
   message: string;
   author: string;
   date: string;
+}
+
+export interface WorkspaceFile {
+  task_id: string;
+  filename: string;
+  content: string;
+  size_bytes: number;
+}
+
+export interface WorkspaceDiff {
+  task_id: string;
+  from_file: string;
+  to_file: string;
+  diff: string;
+}
+
+export interface WebhookConfig {
+  url: string;
+  secret?: string;
+  events: string[];
+  enabled: boolean;
 }

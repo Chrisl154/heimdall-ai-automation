@@ -39,6 +39,8 @@ export default function KanbanPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState<NewTaskForm>({ title: "", description: "", priority: "medium" });
   const [saving, setSaving] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [templateList, setTemplateList] = useState<Array<{ id: string; label: string; priority: string; tags: string[]; description_template: string }>>([]);
 
   const refresh = useCallback(() => { api.tasks.list().then(setTasks).catch(() => {}); }, []);
 
@@ -47,6 +49,12 @@ export default function KanbanPage() {
     const unsub = subscribeToEvents(() => refresh());
     return unsub;
   }, [refresh]);
+
+  useEffect(() => {
+    if (showAdd) {
+      fetch("/api/templates").then(r => r.json()).then(setTemplateList).catch(() => {});
+    }
+  }, [showAdd]);
 
   const byStatus = (s: TaskStatus) => tasks.filter(t => t.status === s);
 
@@ -58,6 +66,7 @@ export default function KanbanPage() {
     await refresh();
     setForm({ title: "", description: "", priority: "medium" });
     setShowAdd(false);
+    setSelectedTemplateId(null);
     setSaving(false);
   };
 
@@ -153,6 +162,29 @@ export default function KanbanPage() {
           <div className="bg-card border border-border rounded-2xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
             <h2 className="font-semibold mb-4">New Task</h2>
             <div className="space-y-3">
+              {templateList.length > 0 && (
+                <select
+                  className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                  value={selectedTemplateId ?? ""}
+                  onChange={e => {
+                    const id = e.target.value;
+                    const tmpl = templateList.find(t => t.id === id);
+                    if (tmpl) {
+                      setForm(f => ({
+                        ...f,
+                        description: tmpl.description_template.replace("{{user_spec}}", ""),
+                        priority: tmpl.priority as Task["priority"],
+                      }));
+                      setSelectedTemplateId(id);
+                    } else {
+                      setSelectedTemplateId(null);
+                    }
+                  }}
+                >
+                  <option value="">Select a template (optional)</option>
+                  {templateList.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              )}
               <input
                 className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                 placeholder="Task title"

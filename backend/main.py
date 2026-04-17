@@ -32,16 +32,22 @@ async def lifespan(app: FastAPI):
     # Wire up messaging manager → PM engine
     from core.messaging.manager import MessagingManager
     from core.notification_router import NotificationRouter
+    from core.webhook_dispatcher import WebhookDispatcher
     from core.pm_engine import get_pm
     from core.routes.messaging import set_manager
     from core import config
 
+    cfg = config.load_config()
+
     messaging = MessagingManager(data_dir=os.getenv("HEIMDALL_DATA_DIR", "data"))
     notifier = NotificationRouter(messaging)
-    notifier.configure(config.load_config())
+    notifier.configure(cfg)
+
+    webhooks_dispatcher = WebhookDispatcher(cfg)
 
     pm = get_pm()
     pm.set_notifier(notifier)
+    pm.set_webhook_dispatcher(webhooks_dispatcher)
 
     messaging.set_pm_callback(pm.chat)
     set_manager(messaging)
@@ -80,7 +86,7 @@ app.add_middleware(
 )
 
 # ── Register routers ──────────────────────────────────────────────────────────
-from core.routes import pm, tasks, vault, settings, restrictions, messaging, git  # noqa: E402
+from core.routes import pm, tasks, vault, settings, restrictions, messaging, git, workspace, webhooks, analytics, templates  # noqa: E402
 
 app.include_router(pm.router)
 app.include_router(tasks.router)
@@ -89,6 +95,10 @@ app.include_router(settings.router)
 app.include_router(restrictions.router)
 app.include_router(messaging.router)
 app.include_router(git.router)
+app.include_router(workspace.router)
+app.include_router(webhooks.router)
+app.include_router(analytics.router)
+app.include_router(templates.router)
 
 
 @app.get("/api/health")

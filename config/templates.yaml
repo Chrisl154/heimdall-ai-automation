@@ -1,0 +1,77 @@
+- id: react-component
+  label: "React Component"
+  priority: medium
+  tags:
+    - frontend
+    - react
+    - typescript
+  max_review_iterations: 3
+  description_template: |
+    Implement the React component described below.
+    Use TypeScript, Tailwind CSS, and lucide-react for icons.
+    Export the component as default.
+
+    Component spec:
+    {{user_spec}}
+
+- id: python-module
+  label: "Python Module"
+  priority: medium
+  tags:
+    - python
+    - backend
+    - types
+  max_review_iterations: 3
+  description_template: |
+    Implement the Python module described below.
+    Use type annotations, docstrings, and follow PEP 8 style.
+    Include unit tests in the test suite.
+
+    Module spec:
+    {{user_spec}}
+
+- id: api-endpoint
+  label: "API Endpoint"
+  priority: medium
+  tags:
+    - python
+    - fastapi
+    - api
+  max_review_iterations: 3
+  description_template: |
+    Implement the FastAPI endpoint described below.
+    Use Pydantic models for request/response validation.
+    Include error handling and appropriate status codes.
+
+    Endpoint spec:
+    {{user_spec}}
+
+- id: bug-fix
+  label: "Bug Fix"
+  priority: high
+  tags:
+    - debugging
+    - fix
+  max_review_iterations: 5
+  description_template: |
+    Fix the bug described below.
+    Include root cause analysis in the implementation notes.
+    Add tests to prevent regression.
+
+    Bug description:
+    {{user_spec}}
+
+- id: refactor
+  label: "Refactor"
+  priority: low
+  tags:
+    - refactoring
+    - code-quality
+  max_review_iterations: 3
+  description_template: |
+    Refactor the described code for improved clarity and performance.
+    Maintain backward compatibility.
+    Document any API changes.
+
+    Refactoring target:
+    {{user_spec}}

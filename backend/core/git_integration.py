@@ -74,6 +74,14 @@ class GitManager:
         except Exception:
             return []
 
+    def create_branch(self, name: str) -> None:
+        if not self._repo:
+            raise GitError("No git repo found.")
+        try:
+            self._repo.git.checkout("-b", name)
+        except Exception as exc:
+            raise GitError(f"Branch creation failed: {exc}") from exc
+
     def push(self, remote: str = "origin", branch: Optional[str] = None) -> None:
         from core.restrictions import check_git_push
         check_git_push(force=False)
@@ -84,3 +92,21 @@ class GitManager:
             self._repo.remote(remote).push(ref)
         except Exception as exc:
             raise GitError(f"Push failed: {exc}") from exc
+
+    def create_github_pr(
+        self,
+        title: str,
+        body: str,
+        head: str,
+        base: str,
+        token: str,
+        repo: str,
+    ) -> str:
+        try:
+            from github import Github
+            g = Github(token)
+            gh_repo = g.get_repo(repo)
+            pr = gh_repo.create_pull(title=title, body=body, head=head, base=base)
+            return pr.html_url
+        except Exception as exc:
+            raise GitError(f"GitHub PR creation failed: {exc}") from exc

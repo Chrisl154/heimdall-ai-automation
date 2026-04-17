@@ -1,13 +1,16 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Columns3, Settings, GitBranch, MessageSquare } from "lucide-react";
+import { Bot, Columns3, Settings, GitBranch, MessageSquare, ScrollText, FolderSearch, BarChart2 } from "lucide-react";
 
 const nav = [
-  { href: "/", label: "Chat", icon: MessageSquare },
-  { href: "/tasks", label: "Kanban", icon: Columns3 },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/git", label: "Git", icon: GitBranch },
+  { href: "/",          label: "Chat",      icon: MessageSquare },
+  { href: "/tasks",     label: "Kanban",    icon: Columns3 },
+  { href: "/workspace", label: "Workspace", icon: FolderSearch },
+  { href: "/logs",      label: "Logs",      icon: ScrollText },
+  { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/settings",  label: "Settings",  icon: Settings },
+  { href: "/git",       label: "Git",       icon: GitBranch },
 ];
 
 export function Sidebar() {

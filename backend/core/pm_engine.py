@@ -40,6 +40,7 @@ class PMEngine:
         self._chat_history: list[ChatMessage] = []
         self._task_mgr = None   # lazily imported to avoid circular deps
         self._notifier = None
+        self._webhook_dispatcher = None
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -226,10 +227,15 @@ class PMEngine:
     async def _emit(self, event_type: EventType, task_id: Optional[str], message: str, data: Optional[dict] = None) -> None:
         event = PipelineEvent(type=event_type, task_id=task_id, message=message, data=data or {})
         await self._event_queue.put(event)
+        await self._dispatch_webhook(event)
 
     async def _notify(self, message: str, urgent: bool = False) -> None:
         if self._notifier:
             await self._notifier.broadcast(message, urgent=urgent)
+
+    async def _dispatch_webhook(self, event: PipelineEvent) -> None:
+        if self._webhook_dispatcher:
+            await self._webhook_dispatcher.handle_event(event)
 
     async def _maybe_commit(self, task: Task, output: str) -> None:
         if not config.get("pm.auto_commit", True):
@@ -258,6 +264,9 @@ class PMEngine:
 
     def set_notifier(self, notifier) -> None:
         self._notifier = notifier
+
+    def set_webhook_dispatcher(self, dispatcher) -> None:
+        self._webhook_dispatcher = dispatcher
 
 
 # Module-level singleton
