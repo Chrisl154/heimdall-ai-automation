@@ -21,13 +21,13 @@ Claude audits and promotes once done.
 ---
 
 > **Status as of 2026-04-17**
-> - Phase B — assigned to Qwen (in progress)
+> - Phase B — promoted ✓
 > - Phase C — implemented by Claude (Logs page, Workspace browser) — DO NOT duplicate
-> - Phase D — available for Qwen
-> - Phase E-1 — available for Qwen
+> - Phase D — promoted ✓
+> - Phase E-1 — **available for Qwen** (only remaining phase)
 > - Phase E-2 — implemented by Claude (workspace file API) — DO NOT duplicate
-> - Phase E-3 — available for Qwen
-> - Phase E-4 — available for Qwen
+> - Phase E-3 — promoted ✓
+> - Phase E-4 — promoted ✓
 > - Phase E-5 — implemented by Claude (webhooks) — DO NOT duplicate
 
 ---
