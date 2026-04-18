@@ -3,6 +3,7 @@ MessagingManager — starts/stops adapters and routes outbound messages.
 """
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,13 @@ _ADAPTER_MAP = {
     ChannelType.TELEGRAM: "core.messaging.adapters.telegram.TelegramAdapter",
     ChannelType.DISCORD: "core.messaging.adapters.discord.DiscordAdapter",
     ChannelType.EMAIL: "core.messaging.adapters.email_adapter.EmailAdapter",
+}
+
+_VAULT_CRED_KEYS = {
+    # channel_type -> list of credential field names that should go in vault
+    ChannelType.TELEGRAM: ["bot_token"],
+    ChannelType.DISCORD: ["bot_token"],
+    ChannelType.EMAIL: ["smtp_password", "imap_password"],
 }
 
 
@@ -49,8 +57,39 @@ class MessagingManager:
             logger.warning("Failed to load channels: %s", exc)
 
     def _save_channels(self) -> None:
+        # Save channels with vault key references, not raw secrets
         data = [c.model_dump() for c in self._channels.values()]
         self._channels_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    # ── Credential vault storage ───────────────────────────────────────────────
+
+    def _store_credentials_in_vault(self, channel: MessagingChannel) -> MessagingChannel:
+        """Move sensitive credential values into the vault, replacing them with vault key refs."""
+        vault = get_vault()
+        secret_fields = _VAULT_CRED_KEYS.get(channel.type, [])
+        new_creds = dict(channel.credentials)
+        for field in secret_fields:
+            raw_value = new_creds.get(field, "")
+            if not raw_value:
+                continue
+            # Only store if it looks like an actual secret, not already a vault key ref
+            vault_key = f"channel_{channel.id}_{field}"
+            vault.set(vault_key, raw_value)
+            new_creds[field] = vault_key  # store the key name, not the secret
+        channel.credentials = new_creds
+        return channel
+
+    def _resolve_credentials(self, channel: MessagingChannel) -> MessagingChannel:
+        """Resolve vault key references back to real values for use by adapters."""
+        vault = get_vault()
+        resolved = {}
+        for k, v in channel.credentials.items():
+            resolved[k] = vault.get(v, v)  # if v is a vault key → real value; else v itself
+        # Return a copy so the stored channel keeps vault key refs
+        import copy
+        resolved_ch = copy.copy(channel)
+        resolved_ch.credentials = resolved
+        return resolved_ch
 
     # ── Adapter lifecycle ──────────────────────────────────────────────────────
 
@@ -58,16 +97,15 @@ class MessagingManager:
         self._pm_callback = cb
 
     async def start_all(self) -> None:
-        vault = get_vault()
         for channel in self._channels.values():
-            if not channel.enabled:
-                continue
-            # Inject credentials from vault
-            resolved_creds = {}
-            for k, v in channel.credentials.items():
-                resolved_creds[k] = vault.get(v, v)  # treat value as vault key name
-            channel.credentials = resolved_creds
-            await self._start_adapter(channel)
+            if channel.enabled:
+                await self.start_channel(channel)
+
+    async def start_channel(self, channel: MessagingChannel) -> None:
+        """Start (or restart) the adapter for a single channel."""
+        if channel.id in self._adapters:
+            await self.stop_channel(channel.id)
+        await self._start_adapter(channel)
 
     async def _start_adapter(self, channel: MessagingChannel) -> None:
         dotpath = _ADAPTER_MAP.get(channel.type)
@@ -75,8 +113,9 @@ class MessagingManager:
             logger.warning("No adapter for channel type: %s", channel.type)
             return
         try:
+            resolved = self._resolve_credentials(channel)
             AdapterCls = _import_adapter(dotpath)
-            adapter = AdapterCls(channel, self._on_inbound_message)
+            adapter = AdapterCls(resolved, self._on_inbound_message)
             await adapter.start()
             self._adapters[channel.id] = adapter
             logger.info("Started %s adapter for channel %s", channel.type, channel.id)
@@ -85,13 +124,18 @@ class MessagingManager:
         except Exception as exc:
             logger.error("Failed to start adapter for channel %s: %s", channel.id, exc)
 
-    async def stop_all(self) -> None:
-        for adapter in self._adapters.values():
+    async def stop_channel(self, channel_id: str) -> None:
+        """Stop the adapter for a single channel if running."""
+        adapter = self._adapters.pop(channel_id, None)
+        if adapter:
             try:
                 await adapter.stop()
             except Exception as exc:
-                logger.warning("Adapter stop error: %s", exc)
-        self._adapters.clear()
+                logger.warning("Adapter stop error for %s: %s", channel_id, exc)
+
+    async def stop_all(self) -> None:
+        for channel_id in list(self._adapters.keys()):
+            await self.stop_channel(channel_id)
 
     # ── Broadcast ──────────────────────────────────────────────────────────────
 
@@ -111,6 +155,8 @@ class MessagingManager:
     # ── Channel CRUD ───────────────────────────────────────────────────────────
 
     def add_channel(self, channel: MessagingChannel) -> None:
+        # Store sensitive credentials in vault before persisting
+        channel = self._store_credentials_in_vault(channel)
         self._channels[channel.id] = channel
         self._save_channels()
 
