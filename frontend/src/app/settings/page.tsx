@@ -1,15 +1,15 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, MessagingChannel } from "@/lib/api";
-import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight } from "lucide-react";
+import { api, MessagingChannel, WebhookConfig, AgentConfig, AgentsConfig } from "@/lib/api";
+import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight, Send } from "lucide-react";
 
-type Tab = "providers" | "vault" | "channels" | "restrictions";
+type Tab = "providers" | "vault" | "channels" | "webhooks" | "restrictions";
 type ChannelType = "telegram" | "discord" | "email";
 
 const PROVIDER_KEYS = [
   { key: "anthropic_key", label: "Anthropic (Claude)", provider: "anthropic" },
-  { key: "openai_key",    label: "OpenAI / Codex",     provider: "openai" },
-  { key: "github_token",  label: "GitHub PAT",          provider: "github" },
+  { key: "openai_key", label: "OpenAI / Codex", provider: "openai" },
+  { key: "github_token", label: "GitHub PAT", provider: "github" },
 ];
 
 const CHANNEL_CREDENTIAL_FIELDS: Record<ChannelType, { key: string; label: string; secret?: boolean }[]> = {
@@ -20,15 +20,15 @@ const CHANNEL_CREDENTIAL_FIELDS: Record<ChannelType, { key: string; label: strin
     { key: "bot_token", label: "Bot Token", secret: true },
   ],
   email: [
-    { key: "smtp_host",     label: "SMTP Host" },
-    { key: "smtp_port",     label: "SMTP Port" },
-    { key: "smtp_user",     label: "SMTP User" },
+    { key: "smtp_host", label: "SMTP Host" },
+    { key: "smtp_port", label: "SMTP Port" },
+    { key: "smtp_user", label: "SMTP User" },
     { key: "smtp_password", label: "SMTP Password", secret: true },
-    { key: "imap_host",     label: "IMAP Host" },
-    { key: "imap_port",     label: "IMAP Port" },
-    { key: "imap_user",     label: "IMAP User" },
+    { key: "imap_host", label: "IMAP Host" },
+    { key: "imap_port", label: "IMAP Port" },
+    { key: "imap_user", label: "IMAP User" },
     { key: "imap_password", label: "IMAP Password", secret: true },
-    { key: "from_address",          label: "From Address" },
+    { key: "from_address", label: "From Address" },
     { key: "command_subject_prefix", label: "Command Subject Prefix" },
   ],
 };
@@ -38,6 +38,17 @@ const TYPE_LABELS: Record<ChannelType, string> = {
   discord: "Discord",
   email: "Email",
 };
+
+const AGENT_LABELS: Record<string, string> = {
+  worker: "Worker (Qwen)",
+  reviewer: "Reviewer (Claude)",
+  orchestrator: "Orchestrator (Gemma)",
+};
+
+const WEBHOOK_EVENTS = [
+  "task_completed", "task_escalated", "task_failed",
+  "task_started", "review_approved", "review_rejected",
+];
 
 interface AddChannelForm {
   type: ChannelType;
@@ -49,13 +60,13 @@ interface AddChannelForm {
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("providers");
 
-  // ── Providers / Vault state ──────────────────────────────────────────────────
+  // ── Vault state ──────────────────────────────────────────────────────────────
   const [vaultKeys, setVaultKeys] = useState<string[]>([]);
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   const refreshKeys = () =>
-    api.vault.keys().then(r => setVaultKeys(r.keys)).catch(() => {});
+    api.vault.keys().then(r => setVaultKeys(r.keys)).catch(() => { });
 
   useEffect(() => { refreshKeys(); }, []);
 
@@ -63,15 +74,55 @@ export default function SettingsPage() {
     const val = keyInputs[key];
     if (!val) return;
     setSaving(s => ({ ...s, [key]: true }));
-    await api.vault.set(key, val).catch(() => {});
+    await api.vault.set(key, val).catch(() => { });
     setKeyInputs(s => ({ ...s, [key]: "" }));
     await refreshKeys();
     setSaving(s => ({ ...s, [key]: false }));
   };
 
   const deleteKey = async (key: string) => {
-    await api.vault.delete(key).catch(() => {});
+    await api.vault.delete(key).catch(() => { });
     await refreshKeys();
+  };
+
+  // ── Agent config state ───────────────────────────────────────────────────────
+  const [agentsConfig, setAgentsConfig] = useState<AgentsConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [savingAgent, setSavingAgent] = useState<Record<string, boolean>>({});
+  const [savedAgent, setSavedAgent] = useState<string | null>(null);
+  const [agentEdits, setAgentEdits] = useState<Record<string, { model: string; base_url: string }>>({});
+
+  const refreshConfig = async () => {
+    setConfigLoading(true);
+    try {
+      const cfg = await api.config.agents();
+      setAgentsConfig(cfg);
+      const edits: Record<string, { model: string; base_url: string }> = {};
+      for (const [name, c] of Object.entries(cfg as AgentsConfig)) {
+        edits[name] = { model: (c as AgentConfig).model, base_url: (c as AgentConfig).base_url ?? "" };
+      }
+      setAgentEdits(edits);
+    } catch { }
+    setConfigLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === "providers") refreshConfig();
+  }, [tab]);
+
+  const saveAgentConfig = async (name: string) => {
+    const edits = agentEdits[name];
+    if (!edits) return;
+    setSavingAgent(s => ({ ...s, [name]: true }));
+    try {
+      await api.config.updateAgent(name, { model: edits.model, base_url: edits.base_url || undefined });
+      setSavedAgent(name);
+      setTimeout(() => setSavedAgent(null), 2000);
+      await refreshConfig();
+    } catch (e: unknown) {
+      alert(`Error: ${e instanceof Error ? e.message : "Save failed"}`);
+    }
+    setSavingAgent(s => ({ ...s, [name]: false }));
   };
 
   // ── Restrictions state ───────────────────────────────────────────────────────
@@ -83,11 +134,8 @@ export default function SettingsPage() {
   useEffect(() => {
     if (tab === "restrictions" && !restrictionsText) {
       api.restrictions.get().then(data => {
-        // API returns parsed object; convert back to YAML-like display via JSON for now
-        setRestrictionsText(
-          typeof data === "string" ? data : JSON.stringify(data, null, 2)
-        );
-      }).catch(() => {});
+        setRestrictionsText(data);
+      }).catch(() => { });
     }
   }, [tab]);
 
@@ -107,21 +155,21 @@ export default function SettingsPage() {
   // ── Channels state ───────────────────────────────────────────────────────────
   const [channels, setChannels] = useState<MessagingChannel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addForm, setAddForm] = useState<AddChannelForm>({
+  const [showAddChannelModal, setShowAddChannelModal] = useState(false);
+  const [addChannelForm, setAddChannelForm] = useState<AddChannelForm>({
     type: "telegram",
     name: "",
     targets: "",
     credentials: {},
   });
-  const [addSaving, setAddSaving] = useState(false);
+  const [addChannelSaving, setAddChannelSaving] = useState(false);
 
   const refreshChannels = async () => {
     setChannelsLoading(true);
     try {
       const list = await api.messaging.channels();
       setChannels(list);
-    } catch {}
+    } catch { }
     setChannelsLoading(false);
   };
 
@@ -130,41 +178,96 @@ export default function SettingsPage() {
   }, [tab]);
 
   const toggleChannel = async (ch: MessagingChannel) => {
-    await api.messaging.updateChannel(ch.id, { enabled: !ch.enabled }).catch(() => {});
+    await api.messaging.updateChannel(ch.id, { enabled: !ch.enabled }).catch(() => { });
     await refreshChannels();
   };
 
   const deleteChannel = async (id: string) => {
-    await api.messaging.deleteChannel(id).catch(() => {});
+    await api.messaging.deleteChannel(id).catch(() => { });
     await refreshChannels();
   };
 
-  const openAddModal = () => {
-    setAddForm({ type: "telegram", name: "", targets: "", credentials: {} });
-    setShowAddModal(true);
+  const openAddChannelModal = () => {
+    setAddChannelForm({ type: "telegram", name: "", targets: "", credentials: {} });
+    setShowAddChannelModal(true);
   };
 
   const submitAddChannel = async () => {
-    if (!addForm.name) return;
-    setAddSaving(true);
+    if (!addChannelForm.name) return;
+    setAddChannelSaving(true);
     try {
-      const targets = addForm.targets.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      const targets = addChannelForm.targets.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean);
       await api.messaging.addChannel({
-        type: addForm.type,
-        name: addForm.name,
+        type: addChannelForm.type,
+        name: addChannelForm.name,
         targets,
-        credentials: addForm.credentials,
+        credentials: addChannelForm.credentials,
       });
-      setShowAddModal(false);
+      setShowAddChannelModal(false);
       await refreshChannels();
-    } catch {}
-    setAddSaving(false);
+    } catch { }
+    setAddChannelSaving(false);
+  };
+
+  // ── Webhooks state ───────────────────────────────────────────────────────────
+  const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
+  const [webhooksLoading, setWebhooksLoading] = useState(false);
+  const [showAddWebhookModal, setShowAddWebhookModal] = useState(false);
+  const [addWebhookForm, setAddWebhookForm] = useState({
+    url: "", secret: "", events: [] as string[], enabled: true,
+  });
+  const [savingWebhook, setSavingWebhook] = useState(false);
+
+  const refreshWebhooks = async () => {
+    setWebhooksLoading(true);
+    try {
+      const res = await api.webhooks.list();
+      setWebhooks(res.webhooks);
+    } catch { }
+    setWebhooksLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === "webhooks") refreshWebhooks();
+  }, [tab]);
+
+  const deleteWebhook = async (index: number) => {
+    await api.webhooks.remove(index).catch(() => { });
+    await refreshWebhooks();
+  };
+
+  const testWebhook = async (index: number, url: string) => {
+    try {
+      await api.webhooks.test(index);
+      alert(`Test sent to ${url}`);
+    } catch (e: unknown) {
+      alert(`Error: ${e instanceof Error ? e.message : "Test failed"}`);
+    }
+  };
+
+  const submitAddWebhook = async () => {
+    if (!addWebhookForm.url) return;
+    setSavingWebhook(true);
+    try {
+      await api.webhooks.add({
+        url: addWebhookForm.url,
+        secret: addWebhookForm.secret,
+        events: addWebhookForm.events,
+        enabled: addWebhookForm.enabled,
+      });
+      setShowAddWebhookModal(false);
+      await refreshWebhooks();
+    } catch (e: unknown) {
+      alert(`Error: ${e instanceof Error ? e.message : "Add failed"}`);
+    }
+    setSavingWebhook(false);
   };
 
   const TABS: { id: Tab; label: string }[] = [
     { id: "providers",    label: "AI Providers" },
     { id: "vault",        label: "Vault" },
     { id: "channels",     label: "Channels" },
+    { id: "webhooks",     label: "Webhooks" },
     { id: "restrictions", label: "Restrictions" },
   ];
 
@@ -185,6 +288,58 @@ export default function SettingsPage() {
       {/* ── Providers tab ─────────────────────────────────────────────────────── */}
       {tab === "providers" && (
         <div className="space-y-3">
+          {/* Agent config cards */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">Agent Configuration</h3>
+            {configLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {!configLoading && agentsConfig && Object.entries(agentsConfig).map(([name, cfg]) => (
+              <div key={name} className="bg-card rounded-xl border border-border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium">{AGENT_LABELS[name] ?? name}</p>
+                    <span className="text-xs bg-secondary px-2 py-0.5 rounded text-muted-foreground">
+                      {(cfg as AgentConfig).provider}
+                    </span>
+                  </div>
+                  {savedAgent === name && (
+                    <span className="text-xs text-green-400">Saved!</span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Model</label>
+                    <input
+                      type="text"
+                      value={agentEdits[name]?.model ?? (cfg as AgentConfig).model}
+                      onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
+                      className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                      placeholder="e.g. qwen3.5:35b"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      value={agentEdits[name]?.base_url ?? (cfg as AgentConfig).base_url ?? ""}
+                      onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
+                      className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                      placeholder="http://127.0.0.1:11434"
+                    />
+                  </div>
+                  <button
+                    onClick={() => saveAgentConfig(name)}
+                    disabled={savingAgent[name]}
+                    className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
+                  >
+                    {savingAgent[name] ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* API key rows */}
+          <h3 className="text-sm font-semibold text-foreground pt-2">API Keys</h3>
           <p className="text-sm text-muted-foreground">
             API keys are stored encrypted in the vault. They are never displayed after saving.
           </p>
@@ -241,7 +396,7 @@ export default function SettingsPage() {
             <p className="text-sm text-muted-foreground">
               Telegram, Discord, and Email channels. Credentials are stored encrypted in the vault.
             </p>
-            <button onClick={openAddModal}
+            <button onClick={openAddChannelModal}
               className="flex items-center gap-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 px-3 py-1.5 rounded-lg transition-colors">
               <Plus className="w-3 h-3" /> Add Channel
             </button>
@@ -271,17 +426,60 @@ export default function SettingsPage() {
                   </p>
                 )}
               </div>
-
               <button onClick={() => toggleChannel(ch)}
                 className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors ${ch.enabled ? "text-green-400 hover:text-green-300" : "text-muted-foreground hover:text-foreground"}`}
                 title={ch.enabled ? "Disable" : "Enable"}>
-                {ch.enabled
-                  ? <ToggleRight className="w-5 h-5" />
-                  : <ToggleLeft className="w-5 h-5" />}
+                {ch.enabled ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
                 <span>{ch.enabled ? "On" : "Off"}</span>
               </button>
-
               <button onClick={() => deleteChannel(ch.id)}
+                className="text-muted-foreground hover:text-destructive transition-colors">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Webhooks tab ──────────────────────────────────────────────────────── */}
+      {tab === "webhooks" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Configure webhook endpoints to receive event notifications.
+            </p>
+            <button onClick={() => { setAddWebhookForm({ url: "", secret: "", events: [], enabled: true }); setShowAddWebhookModal(true); }}
+              className="flex items-center gap-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 px-3 py-1.5 rounded-lg transition-colors">
+              <Plus className="w-3 h-3" /> Add Webhook
+            </button>
+          </div>
+
+          {webhooksLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+
+          {!webhooksLoading && webhooks.length === 0 && (
+            <div className="bg-card rounded-xl border border-border p-6 text-center text-muted-foreground text-sm">
+              No webhooks configured. Add one to receive event notifications.
+            </div>
+          )}
+
+          {webhooks.map((wh, idx) => (
+            <div key={idx} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium truncate">{wh.url}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded ${wh.enabled ? "bg-primary/20 text-primary" : "text-muted-foreground bg-secondary"}`}>
+                    {wh.enabled ? "Enabled" : "Disabled"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Events: {wh.events.length > 0 ? wh.events.join(", ") : "none"}
+                </p>
+              </div>
+              <button onClick={() => testWebhook(idx, wh.url)}
+                className="text-muted-foreground hover:text-primary transition-colors" title="Send test">
+                <Send className="w-4 h-4" />
+              </button>
+              <button onClick={() => deleteWebhook(idx)}
                 className="text-muted-foreground hover:text-destructive transition-colors">
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -317,70 +515,132 @@ export default function SettingsPage() {
       )}
 
       {/* ── Add Channel Modal ─────────────────────────────────────────────────── */}
-      {showAddModal && (
+      {showAddChannelModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-base font-semibold">Add Channel</h2>
-
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground">Type</label>
               <select
                 className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
-                value={addForm.type}
-                onChange={e => setAddForm(f => ({ ...f, type: e.target.value as ChannelType, credentials: {} }))}>
+                value={addChannelForm.type}
+                onChange={e => setAddChannelForm((f: AddChannelForm) => ({ ...f, type: e.target.value as ChannelType, credentials: {} }))}>
                 <option value="telegram">Telegram</option>
                 <option value="discord">Discord</option>
                 <option value="email">Email</option>
               </select>
             </div>
-
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground">Name</label>
               <input
                 className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                 placeholder="e.g. Heimdall Alerts"
-                value={addForm.name}
-                onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                value={addChannelForm.name}
+                onChange={e => setAddChannelForm(f => ({ ...f, name: e.target.value }))}
               />
             </div>
-
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground">
-                Targets <span className="text-muted-foreground/60">(chat IDs / channel IDs / email addresses, comma-separated)</span>
+                Targets <span className="text-muted-foreground/60">(comma-separated)</span>
               </label>
               <textarea
                 className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary resize-none"
                 rows={2}
                 placeholder="e.g. 123456789, 987654321"
-                value={addForm.targets}
-                onChange={e => setAddForm(f => ({ ...f, targets: e.target.value }))}
+                value={addChannelForm.targets}
+                onChange={e => setAddChannelForm(f => ({ ...f, targets: e.target.value }))}
               />
             </div>
-
-            {CHANNEL_CREDENTIAL_FIELDS[addForm.type].map(({ key, label, secret }) => (
+            {CHANNEL_CREDENTIAL_FIELDS[addChannelForm.type].map(({ key, label, secret }) => (
               <div key={key} className="space-y-2">
                 <label className="text-xs text-muted-foreground">{label}</label>
                 <input
                   type={secret ? "password" : "text"}
                   className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                   placeholder={label}
-                  value={addForm.credentials[key] ?? ""}
-                  onChange={e => setAddForm(f => ({
+                  value={addChannelForm.credentials[key] ?? ""}
+                  onChange={e => setAddChannelForm(f => ({
                     ...f,
                     credentials: { ...f.credentials, [key]: e.target.value },
                   }))}
                 />
               </div>
             ))}
-
             <div className="flex gap-2 pt-2">
-              <button onClick={() => setShowAddModal(false)}
+              <button onClick={() => setShowAddChannelModal(false)}
                 className="flex-1 text-sm border border-border rounded-lg py-2 text-muted-foreground hover:text-foreground transition-colors">
                 Cancel
               </button>
-              <button onClick={submitAddChannel} disabled={addSaving || !addForm.name}
+              <button onClick={submitAddChannel} disabled={addChannelSaving || !addChannelForm.name}
                 className="flex-1 text-sm bg-primary/20 text-primary hover:bg-primary/30 rounded-lg py-2 disabled:opacity-40 transition-colors">
-                {addSaving ? "Saving…" : "Add Channel"}
+                {addChannelSaving ? "Saving…" : "Add Channel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Webhook Modal ─────────────────────────────────────────────────── */}
+      {showAddWebhookModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-base font-semibold">Add Webhook</h2>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">URL</label>
+              <input
+                type="url"
+                className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                placeholder="https://example.com/webhook"
+                value={addWebhookForm.url}
+                onChange={e => setAddWebhookForm(f => ({ ...f, url: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">Secret (optional)</label>
+              <input
+                type="password"
+                className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                placeholder="Webhook secret for HMAC signing"
+                value={addWebhookForm.secret}
+                onChange={e => setAddWebhookForm(f => ({ ...f, secret: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">Events</label>
+              <div className="space-y-1">
+                {WEBHOOK_EVENTS.map(event => (
+                  <label key={event} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={addWebhookForm.events.includes(event)}
+                      onChange={e => {
+                        const events = e.target.checked
+                          ? [...addWebhookForm.events, event]
+                          : addWebhookForm.events.filter(ev => ev !== event);
+                        setAddWebhookForm(f => ({ ...f, events }));
+                      }}
+                    />
+                    <span className="font-mono">{event}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={addWebhookForm.enabled}
+                onChange={e => setAddWebhookForm(f => ({ ...f, enabled: e.target.checked }))}
+              />
+              Enabled
+            </label>
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setShowAddWebhookModal(false)}
+                className="flex-1 text-sm border border-border rounded-lg py-2 text-muted-foreground hover:text-foreground transition-colors">
+                Cancel
+              </button>
+              <button onClick={submitAddWebhook} disabled={savingWebhook || !addWebhookForm.url}
+                className="flex-1 text-sm bg-primary/20 text-primary hover:bg-primary/30 rounded-lg py-2 disabled:opacity-40 transition-colors">
+                {savingWebhook ? "Saving…" : "Add Webhook"}
               </button>
             </div>
           </div>

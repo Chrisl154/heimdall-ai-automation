@@ -1,14 +1,24 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const getToken = () => (typeof window !== "undefined" ? localStorage.getItem("heimdall_token") ?? "" : "");
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
+    headers: {
+       "Content-Type": "application/json",
+       ...(getToken() ? { "Authorization": `Bearer ${getToken()}` } : {}),
+       ...(init?.headers ?? {}),
+     },
+     ...init,
+    });
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== "undefined") {
+      window.location.href = "/login";
+      return undefined as T;
+     }
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status} ${path}: ${text}`);
-  }
+   }
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -36,6 +46,15 @@ export const api = {
     delete: (id: string) => request(`/api/tasks/${id}`, { method: "DELETE" }),
   },
 
+  schedules: {
+    list: () => request<ScheduledTask[]>("/api/schedule"),
+    create: (body: CreateScheduleBody) =>
+      request<ScheduledTask>("/api/schedule", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<ScheduledTask>) =>
+      request<ScheduledTask>(`/api/schedule/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    delete: (id: string) => request(`/api/schedule/${id}`, { method: "DELETE" }),
+  },
+
   vault: {
     keys: () => request<{ keys: string[] }>("/api/vault/keys"),
     has: (key: string) => request<{ key: string; exists: boolean }>(`/api/vault/has/${key}`),
@@ -51,10 +70,10 @@ export const api = {
   },
 
   restrictions: {
-    get: () => request<Record<string, unknown>>("/api/restrictions"),
+    get: () => request<string>("/api/restrictions"),
     update: (yaml_content: string) =>
       request("/api/restrictions", { method: "PATCH", body: JSON.stringify({ yaml_content }) }),
-  },
+      },
 
   messaging: {
     channels: () => request<MessagingChannel[]>("/api/messaging/channels"),
@@ -82,9 +101,20 @@ export const api = {
 
   webhooks: {
     list: () => request<{ webhooks: WebhookConfig[] }>("/api/webhooks"),
+    add: (body: WebhookCreateBody) =>
+      request<WebhookConfig>("/api/webhooks", { method: "POST", body: JSON.stringify(body) }),
+    remove: (index: number) => request(`/api/webhooks/${index}`, { method: "DELETE" }),
+    update: (index: number, body: Partial<WebhookConfig>) =>
+      request<WebhookConfig>(`/api/webhooks/${index}`, { method: "PATCH", body: JSON.stringify(body) }),
     test: (index: number) => request<{ sent: boolean; url: string }>(`/api/webhooks/test/${index}`, { method: "POST" }),
-  },
-};
+     },
+
+  config: {
+    agents: () => request<AgentsConfig>("/api/config/agents"),
+    updateAgent: (name: string, body: AgentConfigPatch) =>
+      request<AgentConfig>(`/api/config/agents/${name}`, { method: "PATCH", body: JSON.stringify(body) }),
+     },
+ };
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 export function subscribeToEvents(
@@ -96,7 +126,7 @@ export function subscribeToEvents(
     try {
       const data = JSON.parse(e.data);
       if (data.type !== "ping") onEvent(data as PipelineEvent);
-    } catch {}
+    } catch { }
   };
   if (onError) es.onerror = onError;
   return () => es.close();
@@ -133,6 +163,35 @@ export interface CreateTaskBody {
   depends_on?: string[];
   max_review_iterations?: number;
   output_path?: string;
+}
+
+export interface ScheduledTask {
+  id: string;
+  cron: string;
+  task_template: {
+    title: string;
+    description: string;
+    priority: string;
+    tags: string[];
+    depends_on: string[];
+    max_review_iterations: number;
+    output_path: string;
+  };
+  enabled: boolean;
+  last_run?: string;
+  next_run?: string;
+}
+
+export interface CreateScheduleBody {
+  id?: string;
+  cron: string;
+  title: string;
+  description: string;
+  priority: string;
+  tags: string[];
+  depends_on: string[];
+  max_review_iterations: number;
+  output_path: string;
 }
 
 export interface PMStatus {
@@ -194,4 +253,32 @@ export interface WebhookConfig {
   secret?: string;
   events: string[];
   enabled: boolean;
+}
+
+export interface WebhookCreateBody {
+  url: string;
+  events: string[];
+  enabled: boolean;
+}
+
+export interface AgentConfig {
+  model: string;
+  provider: string;
+  base_url?: string;
+  temperature: number;
+  max_tokens: number;
+}
+
+export interface AgentsConfig {
+  worker: AgentConfig;
+  reviewer: AgentConfig;
+  orchestrator: AgentConfig;
+}
+
+export interface AgentConfigPatch {
+  model?: string;
+  provider?: string;
+  base_url?: string;
+  temperature?: number;
+  max_tokens?: number;
 }

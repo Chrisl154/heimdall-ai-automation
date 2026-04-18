@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -55,10 +55,19 @@ async def lifespan(app: FastAPI):
     await messaging.start_all()
     logger.info("Messaging adapters started.")
 
+    # Start scheduler
+    from scheduler import TaskScheduler, set_scheduler
+    from core.task_manager import TaskManager
+    scheduler = TaskScheduler(TaskManager())
+    set_scheduler(scheduler)
+    scheduler.start()
+    logger.info("Scheduler started.")
+
     yield
 
     # ── Shutdown ───────────────────────────────────────────────────────────
     logger.info("Heimdall shutting down…")
+    scheduler.stop()
     await messaging.stop_all()
     if get_pm()._running:
         await get_pm().stop()
@@ -86,19 +95,26 @@ app.add_middleware(
 )
 
 # ── Register routers ──────────────────────────────────────────────────────────
-from core.routes import pm, tasks, vault, settings, restrictions, messaging, git, workspace, webhooks, analytics, templates  # noqa: E402
+from core.routes import pm, tasks, vault, settings, restrictions, messaging, git, workspace, webhooks, analytics, templates     # noqa: E402
+from scheduler import router as schedule_router     # noqa: E402
+from core.auth import require_token     # noqa: E402
+from core.routes.config import router as config_router     # noqa: E402
+from core.routes.setup import router as setup_router     # noqa: E402
 
-app.include_router(pm.router)
-app.include_router(tasks.router)
-app.include_router(vault.router)
-app.include_router(settings.router)
-app.include_router(restrictions.router)
-app.include_router(messaging.router)
-app.include_router(git.router)
-app.include_router(workspace.router)
-app.include_router(webhooks.router)
-app.include_router(analytics.router)
-app.include_router(templates.router)
+app.include_router(pm.router, dependencies=[Depends(require_token)])
+app.include_router(tasks.router, dependencies=[Depends(require_token)])
+app.include_router(vault.router, dependencies=[Depends(require_token)])
+app.include_router(settings.router, dependencies=[Depends(require_token)])
+app.include_router(restrictions.router, dependencies=[Depends(require_token)])
+app.include_router(messaging.router, dependencies=[Depends(require_token)])
+app.include_router(git.router, dependencies=[Depends(require_token)])
+app.include_router(workspace.router, dependencies=[Depends(require_token)])
+app.include_router(webhooks.router, dependencies=[Depends(require_token)])
+app.include_router(analytics.router, dependencies=[Depends(require_token)])
+app.include_router(templates.router, dependencies=[Depends(require_token)])
+app.include_router(schedule_router)
+app.include_router(config_router, dependencies=[Depends(require_token)])
+app.include_router(setup_router)
 
 
 @app.get("/api/health")
