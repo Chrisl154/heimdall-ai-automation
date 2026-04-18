@@ -18,21 +18,21 @@ echo ""
 
 # ── Systemd service ───────────────────────────────────────────────────────────
 
-if systemctl is-active --quiet heimdall-backend 2>/dev/null; then
-    systemctl stop heimdall-backend
-    echo "✓ Service stopped"
-fi
-
-if systemctl is-enabled --quiet heimdall-backend 2>/dev/null; then
-    systemctl disable heimdall-backend
-    echo "✓ Service disabled"
-fi
-
-if [[ -f /etc/systemd/system/heimdall-backend.service ]]; then
-    rm /etc/systemd/system/heimdall-backend.service
-    systemctl daemon-reload
-    echo "✓ Systemd unit removed"
-fi
+for svc in heimdall-frontend heimdall-backend; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+        systemctl stop "$svc"
+        echo "✓ $svc stopped"
+    fi
+    if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+        systemctl disable "$svc"
+        echo "✓ $svc disabled"
+    fi
+    if [[ -f "/etc/systemd/system/${svc}.service" ]]; then
+        rm "/etc/systemd/system/${svc}.service"
+        echo "✓ ${svc}.service removed"
+    fi
+done
+systemctl daemon-reload
 
 # ── CLI and desktop entry ─────────────────────────────────────────────────────
 

@@ -47,29 +47,46 @@ A self-orchestrating multi-AI pipeline. Gemma (LM Studio) acts as the project ma
 ### Linux — one-liner (curl)
 
 ```bash
-# Clone and install (installs systemd service + heimdall CLI)
+# Clone and install
 git clone https://github.com/Chrisl154/heimdall-ai-automation.git
 cd heimdall-ai-automation/AIAutomation
+
+# Local machine (localhost)
 sudo bash install.sh
+
+# Remote / headless server — pass your server's IP or hostname
+sudo bash install.sh --host 192.168.1.50
+sudo bash install.sh --host heimdall.mydomain.com
+
+# Custom ports
+sudo bash install.sh --host 192.168.1.50 --backend-port 8000 --frontend-port 3000
+
 heimdall start
-# Open http://localhost:3000 — setup wizard runs automatically
+# Open http://<your-host>:3000 — setup wizard runs automatically
 ```
 
-Or download and run the installer directly from the repo:
+Or fetch and inspect before running:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/install.sh -o install.sh
-# Review the script, then:
-sudo bash install.sh
+# Review, then:
+sudo bash install.sh --host <your-server-ip>
 ```
+
+The installer:
+- Auto-detects your LAN IP if `--host` is omitted
+- Builds the frontend with `NEXT_PUBLIC_API_URL` baked in for the correct host
+- Writes `CORS_ORIGINS` to `.env` so the backend accepts requests from the frontend origin
+- Installs **two** systemd services: `heimdall-backend` (FastAPI) and `heimdall-frontend` (Next.js)
+- Both start on boot automatically
 
 ### Uninstall
 
 ```bash
-# Remove service, CLI, and desktop entry — keep data
+# Remove services, CLI, and desktop entry — keep .env and data
 sudo bash uninstall.sh
 
-# Remove everything including .env, vault, tasks, workspace
+# Remove everything including .env, vault, tasks, workspace, venv, node_modules
 sudo bash uninstall.sh --purge
 ```
 
@@ -347,34 +364,112 @@ Test modules:
 ## Linux Install (systemd)
 
 ```bash
-sudo bash install.sh
+sudo bash install.sh --host <your-server-ip-or-hostname>
 ```
 
 What it does:
 1. Checks Python 3.11+ and Node 18+
 2. Creates `backend/.venv` and installs Python dependencies
-3. Runs `npm install && npm run build` in `frontend/`
-4. Copies `.env.example` → `.env` if not present
-5. Installs `heimdall-backend.service` systemd unit (auto-starts on boot)
-6. Installs `heimdall` CLI to `/usr/local/bin/`
-7. Installs `.desktop` entry for app launchers
+3. Runs `npm install && npm run build` with `NEXT_PUBLIC_API_URL` set to the correct backend address (critical for remote access)
+4. Copies `.env.example` → `.env` and writes `CORS_ORIGINS` for the server host
+5. Installs **`heimdall-backend.service`** — FastAPI on `0.0.0.0:8000`
+6. Installs **`heimdall-frontend.service`** — Next.js production server on port 3000
+7. Both services enabled to start on boot
+8. Installs `heimdall` CLI to `/usr/local/bin/`
 
 ### `heimdall` CLI
 
 ```bash
-heimdall start     # systemctl start heimdall-backend
-heimdall stop      # systemctl stop heimdall-backend
-heimdall restart   # systemctl restart heimdall-backend
-heimdall status    # systemctl status heimdall-backend
-heimdall logs      # journalctl -u heimdall-backend -f
-heimdall open      # xdg-open http://localhost:3000
+heimdall start          # start backend + frontend
+heimdall stop           # stop frontend + backend
+heimdall restart        # restart both
+heimdall status         # systemctl status for both services
+heimdall logs           # tail logs from both (Ctrl+C to exit)
+heimdall logs-backend   # backend only
+heimdall logs-frontend  # frontend only
+heimdall open           # xdg-open http://<host>:3000
 ```
 
 ### Uninstall
 
 ```bash
-sudo bash uninstall.sh           # remove service + CLI, keep data
+sudo bash uninstall.sh           # remove services + CLI, keep data
 sudo bash uninstall.sh --purge   # also delete .env, data/, vault, tasks/
+```
+
+---
+
+## Server Deployment Notes
+
+### AI connections from a remote server
+
+All AI provider connections are outbound HTTP(S) from the backend. Configure them from **Settings → AI Providers**:
+
+| Provider | Where configured | Notes |
+|---|---|---|
+| Anthropic (Claude) | Vault → `anthropic_key` | Outbound HTTPS to `api.anthropic.com` |
+| OpenAI / Codex | Vault → `openai_key` | Outbound HTTPS to `api.openai.com` |
+| Ollama | Settings → AI Providers → Worker `base_url` | Can be `http://other-server:11434` |
+| LM Studio | Settings → AI Providers → Orchestrator `base_url` | Can be `http://other-server:1234` |
+
+All edits to model names and base URLs are saved immediately to `config/settings.yaml` and take effect on the next pipeline run — no restart required.
+
+### `NEXT_PUBLIC_API_URL`
+
+This is baked into the frontend at build time. If you move the server or change its IP, rebuild the frontend:
+
+```bash
+cd frontend
+NEXT_PUBLIC_API_URL="http://new-host:8000" npm run build
+sudo systemctl restart heimdall-frontend
+```
+
+### CORS
+
+The backend only accepts requests from origins listed in `CORS_ORIGINS` (in `.env`). Update it if you add a reverse proxy or change ports:
+
+```bash
+# .env
+CORS_ORIGINS=http://192.168.1.50:3000,https://heimdall.mydomain.com
+```
+
+Then restart the backend: `sudo systemctl restart heimdall-backend`
+
+### Reverse proxy (optional)
+
+To serve both frontend and backend on port 80/443 via nginx:
+
+```nginx
+# /etc/nginx/sites-available/heimdall
+server {
+    listen 80;
+    server_name heimdall.mydomain.com;
+
+    # Frontend
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+    }
+
+    # Backend API + SSE
+    location /api/ {
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';   # keep SSE connections alive
+        proxy_buffering off;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+When using a reverse proxy, rebuild the frontend with the domain URL and update CORS:
+
+```bash
+NEXT_PUBLIC_API_URL=https://heimdall.mydomain.com npm run build
+# CORS_ORIGINS=https://heimdall.mydomain.com  (in .env)
 ```
 
 ---
