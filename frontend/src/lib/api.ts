@@ -113,8 +113,17 @@ export const api = {
     agents: () => request<AgentsConfig>("/api/config/agents"),
     updateAgent: (name: string, body: AgentConfigPatch) =>
       request<AgentConfig>(`/api/config/agents/${name}`, { method: "PATCH", body: JSON.stringify(body) }),
-     },
- };
+  },
+
+  analytics: () => request<AnalyticsData>("/api/analytics"),
+
+  setup: {
+    status: () => request<{ configured: boolean; has_vault_key: boolean; has_api_token: boolean }>("/api/setup/status"),
+    init: (body: { vault_key: string; api_token: string; anthropic_key?: string; ollama_url?: string }) =>
+      request<{ ok: boolean; message: string }>("/api/setup/init", { method: "POST", body: JSON.stringify(body) }),
+    generateKey: () => request<{ key: string }>("/api/setup/generate-key"),
+  },
+};
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 export function subscribeToEvents(
@@ -281,4 +290,18 @@ export interface AgentConfigPatch {
   base_url?: string;
   temperature?: number;
   max_tokens?: number;
+}
+
+export interface AnalyticsData {
+  total_tasks: number;
+  completed: number;
+  failed: number;
+  escalated: number;
+  pending: number;
+  success_rate: number;
+  avg_iterations: number;
+  avg_duration_seconds: number;
+  tasks_by_priority: { low: number; medium: number; high: number; critical: number };
+  tasks_by_tag: Record<string, number>;
+  recent_completions: { id: string; title: string; completed_at: string; iterations: number }[];
 }

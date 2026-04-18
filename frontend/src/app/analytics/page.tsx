@@ -1,29 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, AnalyticsData } from "@/lib/api";
 import { BarChart2, TrendingUp, Activity, CheckCircle2 } from "lucide-react";
-
-interface AnalyticsData {
-    total_tasks: number;
-    completed: number;
-    failed: number;
-    escalated: number;
-    pending: number;
-    success_rate: number;
-    avg_iterations: number;
-    avg_duration_seconds: number;
-    tasks_by_priority: { low: number; medium: number; high: number; critical: number };
-    tasks_by_tag: { [key: string]: number };
-    recent_completions: { id: string; title: string; completed_at: string; iterations: number }[];
-}
 
 export default function AnalyticsPage() {
     const [data, setData] = useState<AnalyticsData | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        api
-            .request<AnalyticsData>("/api/analytics")
+        api.analytics()
             .then(setData)
             .catch(() => { })
             .finally(() => setLoading(false));
