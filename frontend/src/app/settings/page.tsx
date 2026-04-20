@@ -41,9 +41,19 @@ const TYPE_LABELS: Record<ChannelType, string> = {
 };
 
 const AGENT_LABELS: Record<string, string> = {
-  worker: "Worker (Qwen)",
-  reviewer: "Reviewer (Claude)",
-  orchestrator: "Orchestrator (Gemma)",
+  worker: "Worker",
+  reviewer: "Reviewer",
+  orchestrator: "Orchestrator",
+};
+
+const CLOUD_PROVIDERS = ["anthropic", "openai", "grok", "deepseek"];
+const ALL_PROVIDERS = ["anthropic", "openai", "grok", "deepseek", "ollama", "lmstudio"];
+
+const CLOUD_MODEL_SUGGESTIONS: Record<string, string[]> = {
+  anthropic: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o3-mini"],
+  grok: ["grok-3", "grok-3-mini", "grok-2"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
 };
 
 const WEBHOOK_EVENTS = [
@@ -91,7 +101,7 @@ export default function SettingsPage() {
   const [configLoading, setConfigLoading] = useState(false);
   const [savingAgent, setSavingAgent] = useState<Record<string, boolean>>({});
   const [savedAgent, setSavedAgent] = useState<string | null>(null);
-  const [agentEdits, setAgentEdits] = useState<Record<string, { model: string; base_url: string }>>({});
+  const [agentEdits, setAgentEdits] = useState<Record<string, { model: string; base_url: string; provider: string }>>({});
   const [detectedModels, setDetectedModels] = useState<Record<string, string[]>>({});
   const [scanning, setScanning] = useState<Record<string, boolean>>({});
 
@@ -100,10 +110,9 @@ export default function SettingsPage() {
     try {
       const cfg = await api.config.agents();
       setAgentsConfig(cfg);
-      const edits: Record<string, { model: string; base_url: string }> = {};
+      const edits: Record<string, { model: string; base_url: string; provider: string }> = {};
       for (const [name, c] of Object.entries(cfg as AgentsConfig)) {
-        // Don't pre-fill model — require scanning to confirm it exists
-        edits[name] = { model: "", base_url: (c as AgentConfig).base_url ?? "" };
+        edits[name] = { model: "", base_url: (c as AgentConfig).base_url ?? "", provider: (c as AgentConfig).provider ?? "" };
       }
       setAgentEdits(edits);
     } catch { }
@@ -112,7 +121,7 @@ export default function SettingsPage() {
 
   const scanAgentModels = async (name: string) => {
     const baseUrl = agentEdits[name]?.base_url?.trim();
-    const provider = (agentsConfig as AgentsConfig)?.[name as keyof AgentsConfig]?.provider;
+    const provider = agentEdits[name]?.provider;
     if (!baseUrl || !provider) return;
     setScanning(s => ({ ...s, [name]: true }));
     setDetectedModels(d => ({ ...d, [name]: [] }));
@@ -139,7 +148,11 @@ export default function SettingsPage() {
     if (!edits) return;
     setSavingAgent(s => ({ ...s, [name]: true }));
     try {
-      await api.config.updateAgent(name, { model: edits.model, base_url: edits.base_url || undefined });
+      await api.config.updateAgent(name, {
+        model: edits.model,
+        provider: edits.provider || undefined,
+        base_url: CLOUD_PROVIDERS.includes(edits.provider) ? undefined : (edits.base_url || undefined),
+      });
       setSavedAgent(name);
       setTimeout(() => setSavedAgent(null), 2000);
       await refreshConfig();
@@ -174,7 +187,7 @@ export default function SettingsPage() {
     setReconnecting(false);
 
     try {
-      const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const BASE = process.env.NEXT_PUBLIC_API_URL ?? `http://${window.location.hostname}:8000`;
       const token = localStorage.getItem("heimdall_token") ?? "";
       const res = await fetch(`${BASE}/api/system/update`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -403,84 +416,109 @@ export default function SettingsPage() {
             {configLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
              {!configLoading && agentsConfig && Object.entries(agentsConfig).map(([name, cfg]) => {
               const agentConfig = cfg as AgentConfig;
-              if (!agentConfig || typeof agentConfig !== "object") {
-                return null;
-              }
-              const provider = agentConfig.provider ?? "unknown";
-              const model = agentConfig.model ?? "unknown";
-              const baseUrl = agentConfig.base_url ?? "";
+              if (!agentConfig || typeof agentConfig !== "object") return null;
+              const savedModel = agentConfig.model ?? "";
+              const editProvider = agentEdits[name]?.provider ?? agentConfig.provider ?? "";
+              const isCloud = CLOUD_PROVIDERS.includes(editProvider);
+              const isLocal = !isCloud && !!editProvider;
+              const suggestions = CLOUD_MODEL_SUGGESTIONS[editProvider] ?? [];
+              const listId = `models-${name}`;
               return (
-                 <div key={name} className="bg-card rounded-xl border border-border p-4">
-                   <div className="flex items-center justify-between mb-3">
-                     <div>
-                       <p className="text-sm font-medium">{AGENT_LABELS[name] ?? name}</p>
-                       <span className="text-xs bg-secondary px-2 py-0.5 rounded text-muted-foreground">
-                         {provider}
-                       </span>
-                     </div>
-                     {savedAgent === name && (
-                       <span className="text-xs text-green-400">Saved!</span>
-                     )}
-                   </div>
-                   <div className="space-y-2">
-                     {/* Current saved model (read-only) */}
-                     {model && (
-                       <p className="text-xs text-muted-foreground">
-                         Current: <span className="font-mono text-foreground/70">{model}</span>
-                       </p>
-                     )}
-                     {/* Base URL + Scan */}
-                     <div>
-                       <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
-                       <div className="flex gap-2">
-                         <input
-                           type="text"
-                           value={agentEdits[name]?.base_url ?? baseUrl}
-                           onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
-                           className="flex-1 px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                           placeholder="http://127.0.0.1:11434"
-                         />
-                         <button
-                           onClick={() => scanAgentModels(name)}
-                           disabled={scanning[name] || !agentEdits[name]?.base_url}
-                           className="flex items-center gap-1 px-3 py-1.5 bg-secondary border border-border rounded text-xs hover:bg-secondary/70 disabled:opacity-40 transition-colors shrink-0"
-                           title="Scan provider for available models"
-                         >
-                           <RefreshCw className={`w-3 h-3 ${scanning[name] ? "animate-spin" : ""}`} />
-                           {scanning[name] ? "Scanning…" : "Scan"}
-                         </button>
-                       </div>
-                     </div>
-                     {/* Model — only populated after scan */}
-                     <div>
-                       <label className="text-xs text-muted-foreground block mb-1">Model</label>
-                       {detectedModels[name]?.length > 0 ? (
-                         <select
-                           value={agentEdits[name]?.model ?? ""}
-                           onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
-                           className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                         >
-                           <option value="">Select a model…</option>
-                           {detectedModels[name].map(m => (
-                             <option key={m} value={m}>{m}</option>
-                           ))}
-                         </select>
-                       ) : (
-                         <div className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm text-muted-foreground italic">
-                           {scanning[name] ? "Scanning…" : "Enter Base URL above and click Scan"}
-                         </div>
-                       )}
-                     </div>
-                     <button
-                       onClick={() => saveAgentConfig(name)}
-                       disabled={savingAgent[name] || !agentEdits[name]?.model}
-                       className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
-                     >
-                       {savingAgent[name] ? "Saving…" : "Save"}
-                     </button>
-                   </div>
-                 </div>
-               );
+                <div key={name} className="bg-card rounded-xl border border-border p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium">{AGENT_LABELS[name] ?? name}</p>
+                    {savedAgent === name && <span className="text-xs text-green-400">Saved!</span>}
+                  </div>
+                  <div className="space-y-2">
+                    {savedModel && (
+                      <p className="text-xs text-muted-foreground">
+                        Current: <span className="font-mono text-foreground/70">{savedModel}</span>
+                        {agentConfig.provider && <span className="ml-2 bg-secondary px-1.5 py-0.5 rounded">{agentConfig.provider}</span>}
+                      </p>
+                    )}
+
+                    {/* Provider selector */}
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Provider</label>
+                      <select
+                        value={editProvider}
+                        onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], provider: e.target.value, model: "", base_url: ed[name]?.base_url ?? "" } }))}
+                        className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                      >
+                        <option value="">Select provider…</option>
+                        {ALL_PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Local: Base URL + Scan */}
+                    {isLocal && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={agentEdits[name]?.base_url ?? ""}
+                            onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
+                            className="flex-1 px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                            placeholder={editProvider === "ollama" ? "http://127.0.0.1:11434" : "http://127.0.0.1:1234"}
+                          />
+                          <button
+                            onClick={() => scanAgentModels(name)}
+                            disabled={scanning[name] || !agentEdits[name]?.base_url}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-secondary border border-border rounded text-xs hover:bg-secondary/70 disabled:opacity-40 transition-colors shrink-0"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${scanning[name] ? "animate-spin" : ""}`} />
+                            {scanning[name] ? "Scanning…" : "Scan"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Model input */}
+                    {editProvider && (
+                      <div>
+                        <label className="text-xs text-muted-foreground block mb-1">Model</label>
+                        {isCloud ? (
+                          <>
+                            <input
+                              list={listId}
+                              type="text"
+                              value={agentEdits[name]?.model ?? ""}
+                              onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
+                              className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                              placeholder="Type or pick a model…"
+                            />
+                            <datalist id={listId}>
+                              {suggestions.map(m => <option key={m} value={m} />)}
+                            </datalist>
+                          </>
+                        ) : detectedModels[name]?.length > 0 ? (
+                          <select
+                            value={agentEdits[name]?.model ?? ""}
+                            onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
+                            className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                          >
+                            <option value="">Select a model…</option>
+                            {detectedModels[name].map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        ) : (
+                          <div className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm text-muted-foreground italic">
+                            {scanning[name] ? "Scanning…" : "Enter Base URL above and click Scan"}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => saveAgentConfig(name)}
+                      disabled={savingAgent[name] || !agentEdits[name]?.model || !editProvider}
+                      className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
+                    >
+                      {savingAgent[name] ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              );
              })}
           </div>
 
