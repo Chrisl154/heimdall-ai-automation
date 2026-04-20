@@ -156,9 +156,10 @@ async def clone_repo(body: CloneRequest):
     """Clone a repo (or pull if already cloned) and optionally set as active project."""
     token = Vault().get("github_token")
 
-    clone_url = body.clone_url
-    if token and clone_url.startswith("https://"):
-        clone_url = clone_url.replace("https://", f"https://{token}@")
+    clean_url = body.clone_url
+    auth_url = clean_url
+    if token and clean_url.startswith("https://"):
+        auth_url = clean_url.replace("https://", f"https://{token}@")
 
     repo_name = body.repo_full_name.split("/")[-1]
     projects_dir = _projects_dir()
@@ -167,17 +168,25 @@ async def clone_repo(body: CloneRequest):
 
     try:
         if dest.exists() and (dest / ".git").exists():
+            # Pull using credential helper so token stays out of remote URL
+            env = {**os.environ, "GIT_ASKPASS": "echo", "GIT_USERNAME": "x-token", "GIT_PASSWORD": token or ""}
             result = subprocess.run(
                 ["git", "-C", str(dest), "pull", "--ff-only"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, timeout=120, env=env,
             )
             action = "pulled"
         else:
             result = subprocess.run(
-                ["git", "clone", clone_url, str(dest)],
+                ["git", "clone", auth_url, str(dest)],
                 capture_output=True, text=True, timeout=300,
             )
             action = "cloned"
+            # Strip the token from the stored remote URL so .git/config has no plain-text secret
+            if token and result.returncode == 0:
+                subprocess.run(
+                    ["git", "-C", str(dest), "remote", "set-url", "origin", clean_url],
+                    capture_output=True, timeout=10,
+                )
 
         if result.returncode != 0:
             err = result.stderr

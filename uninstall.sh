@@ -110,6 +110,16 @@ fi
 
 if [[ "$PURGE" == "true" ]]; then
     echo ""
+    echo "⚠  PURGE MODE — this will permanently delete:"
+    echo "   • data/vault.enc  — ALL encrypted secrets (GitHub PAT, API keys, bot tokens)"
+    echo "   • .env            — vault encryption key (secrets become unrecoverable)"
+    echo "   • config/         — agent config, active project path"
+    echo "   • tasks/          — task backlog"
+    echo "   • workspace/      — task output files"
+    echo ""
+    read -rp "Type YES to confirm permanent deletion of all secrets and data: " purge_confirm
+    [[ "$purge_confirm" == "YES" ]] || { echo "Purge cancelled."; exit 0; }
+    echo ""
     echo "→ Purging runtime data and build artifacts..."
 
     _rm() {
@@ -148,14 +158,15 @@ if [[ "$PURGE" == "true" ]]; then
     fi
 else
     echo ""
-    echo "→ The following are PRESERVED (your external connections are safe):"
+    echo "→ The following are PRESERVED:"
     echo "   .env          — vault encryption key + API token"
-    echo "   data/         — encrypted vault: API keys (Anthropic, OpenAI, Grok, DeepSeek, GitHub)"
-    echo "   config/       — settings: active project, agent config, provider URLs"
+    echo "   data/         — encrypted vault (GitHub PAT, API keys, bot tokens — all encrypted)"
+    echo "   config/       — agent config, active project path"
     echo "   tasks/        — task backlog"
     echo "   workspace/    — task output files"
     echo ""
-    echo "  Re-run with --purge to delete ALL data including vault secrets."
+    echo "  Your GitHub token and all API keys are safe in the encrypted vault."
+    echo "  Re-run with --purge to permanently delete ALL data including secrets."
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
