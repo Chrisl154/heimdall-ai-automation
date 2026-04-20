@@ -99,61 +99,48 @@ case "$PKG_MGR" in
 esac
 echo "✓ System dependencies installed"
 
-# ── Python 3.11+ ─────────────────────────────────────────────────────────────
+# ── Python 3.10+ ─────────────────────────────────────────────────────────────
+# All dependencies support Python 3.10+. Ubuntu 22.04 ships 3.10 natively —
+# no PPA needed. Only attempt to install if the system has nothing usable.
 
 PYTHON_BIN="python3"
 _pyver() { "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0"; }
 _pyok()  { local v; v=$(_pyver "$1"); local maj min; maj=${v%%.*}; min=${v##*.}
-           [[ "$maj" -gt 3 ]] || { [[ "$maj" -eq 3 ]] && [[ "$min" -ge 11 ]]; }; }
+           [[ "$maj" -gt 3 ]] || { [[ "$maj" -eq 3 ]] && [[ "$min" -ge 10 ]]; }; }
+
+# Prefer the highest available version already on the system
+for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" &>/dev/null && _pyok "$candidate"; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
 
 if ! _pyok "$PYTHON_BIN"; then
     CURRENT_VER=$(_pyver "$PYTHON_BIN")
-    # Check if python3.11 (or newer) binary already exists before touching apt
-    for candidate in python3.13 python3.12 python3.11; do
-        if command -v "$candidate" &>/dev/null && _pyok "$candidate"; then
-            PYTHON_BIN="$candidate"
-            break
-        fi
-    done
-fi
-
-if ! _pyok "$PYTHON_BIN"; then
-    CURRENT_VER=$(_pyver "$PYTHON_BIN")
-    echo "→ Python $CURRENT_VER found — need 3.11+, attempting install..."
+    echo "→ Python $CURRENT_VER found — need 3.10+, attempting install..."
     case "$PKG_MGR" in
         apt)
-            if grep -qi ubuntu /etc/os-release 2>/dev/null; then
-                apt-get install -y -qq software-properties-common
-                add-apt-repository -y ppa:deadsnakes/ppa
-                apt-get update -qq
-                # Use --no-install-recommends and force-overwrite to avoid RC/partial conflicts
-                apt-get install -y -qq --no-install-recommends \
-                    -o Dpkg::Options::="--force-overwrite" \
-                    python3.11 python3.11-venv python3.11-dev
-            else
-                apt-get install -y -qq python3.11 python3.11-venv python3.11-dev 2>/dev/null || {
-                    echo "✗ Python 3.11+ not available. Install manually and re-run."
-                    exit 1
-                }
-            fi
-            PYTHON_BIN="python3.11"
+            apt-get install -y -qq python3 python3-venv python3-dev || {
+                echo "✗ Could not install Python 3.10+. Install manually and re-run."
+                exit 1
+            }
+            PYTHON_BIN="python3"
             ;;
         dnf)
-            dnf install -y python3.11 python3.11-devel 2>/dev/null || {
-                echo "✗ Python 3.11+ not available via dnf. Install manually and re-run."
+            dnf install -y python3 python3-devel || {
+                echo "✗ Could not install Python 3.10+ via dnf. Install manually and re-run."
                 exit 1
             }
-            PYTHON_BIN="python3.11"
             ;;
         yum)
-            yum install -y python3.11 python3.11-devel 2>/dev/null || {
-                echo "✗ Python 3.11+ not available via yum. Install manually and re-run."
+            yum install -y python3 python3-devel || {
+                echo "✗ Could not install Python 3.10+ via yum. Install manually and re-run."
                 exit 1
             }
-            PYTHON_BIN="python3.11"
             ;;
         *)
-            echo "✗ Python 3.11+ required (found $CURRENT_VER). Install manually and re-run."
+            echo "✗ Python 3.10+ required (found $CURRENT_VER). Install manually and re-run."
             exit 1
             ;;
     esac
