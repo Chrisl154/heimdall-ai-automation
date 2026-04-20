@@ -266,6 +266,7 @@ export interface WebhookConfig {
 
 export interface WebhookCreateBody {
   url: string;
+  secret?: string;
   events: string[];
   enabled: boolean;
 }
