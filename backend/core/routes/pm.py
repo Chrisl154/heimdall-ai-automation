@@ -101,6 +101,12 @@ async def direct_chat(body: DirectChatRequest):
     return {"reply": reply, "provider": body.provider, "model": body.model, "session_id": body.session_id}
 
 
+@router.get("/conversation")
+def get_conversation(limit: int = 100):
+    """Return the agent-to-agent conversation log."""
+    return {"entries": get_pm().get_conversation(limit)}
+
+
 @router.get("/events")
 async def event_stream():
     """Server-Sent Events stream for real-time pipeline updates."""

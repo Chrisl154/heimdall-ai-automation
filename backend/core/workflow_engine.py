@@ -38,8 +38,9 @@ from core.restrictions import (
 
 
 class WorkflowEngine:
-    def __init__(self, event_queue: asyncio.Queue):
+    def __init__(self, event_queue: asyncio.Queue, conversation_log: list | None = None):
         self._queue = event_queue
+        self._log: list = conversation_log if conversation_log is not None else []
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -175,10 +176,14 @@ class WorkflowEngine:
         base_url = agent_cfg.get("base_url") or None
         api_key = vault.get(f"{provider}_key") or vault.get("openai_key")
 
+        iteration_num = task.current_iteration
+
         if prior_review is None:
             prompt = self._build_initial_prompt(task)
+            self._record("pm", "PM → Worker (Qwen)", prompt, task.id, iteration_num, "prompt")
         else:
             prompt = self._build_fix_prompt(task, prior_review)
+            self._record("pm", "PM → Worker (Qwen) [fix request]", prompt, task.id, iteration_num, "prompt")
 
         try:
             output = await call_llm(
@@ -195,6 +200,7 @@ class WorkflowEngine:
             raise RuntimeError(f"Worker LLM failed: {exc}") from exc
 
         await self._emit(EventType.WORKER_OUTPUT_RECEIVED, task.id, f"Worker response received ({len(output)} chars)")
+        self._record("worker", "Worker (Qwen)", output, task.id, iteration_num, "response")
         return output
 
     async def _call_reviewer(self, task: Task, worker_output: str, iteration: int) -> ReviewResult:
@@ -210,6 +216,11 @@ class WorkflowEngine:
         api_key = vault.get("anthropic_key")
 
         prompt = self._build_review_prompt(task, worker_output, iteration)
+        self._record(
+            "pm", f"PM → Reviewer (Claude) [review request, iteration {iteration}]",
+            f"Reviewing Qwen's output for: {task.title}\n\nIteration {iteration}",
+            task.id, iteration, "prompt",
+        )
 
         try:
             raw = await call_llm(
@@ -225,7 +236,17 @@ class WorkflowEngine:
         except LLMError as exc:
             raise RuntimeError(f"Reviewer LLM failed: {exc}") from exc
 
-        return self._parse_review(raw, iteration)
+        review = self._parse_review(raw, iteration)
+        verdict = "APPROVED ✓" if review.approved else "CHANGES REQUIRED ✗"
+        review_content = f"**{verdict}**\n\n{review.summary}"
+        if review.issues:
+            review_content += "\n\n**Issues:**\n" + "\n".join(
+                f"- [{i.severity.upper()}] {i.description}" for i in review.issues
+            )
+        if review.feedback:
+            review_content += f"\n\n**Notes:**\n{review.feedback}"
+        self._record("reviewer", "Reviewer (Claude)", review_content, task.id, iteration, "response")
+        return review
 
     # ── Prompt builders ───────────────────────────────────────────────────────
 
@@ -285,6 +306,30 @@ class WorkflowEngine:
                 feedback=raw[:2000],
                 iteration=iteration,
             )
+
+    # ── Conversation log ──────────────────────────────────────────────────────
+
+    def _record(
+        self,
+        agent: str,
+        label: str,
+        content: str,
+        task_id: str,
+        iteration: int = 0,
+        entry_type: str = "response",
+    ) -> None:
+        self._log.append({
+            "agent": agent,
+            "label": label,
+            "content": content,
+            "task_id": task_id,
+            "iteration": iteration,
+            "type": entry_type,
+            "timestamp": time.time(),
+        })
+        # Cap at 500 entries to prevent unbounded memory growth
+        if len(self._log) > 500:
+            self._log.pop(0)
 
     # ── Event helpers ─────────────────────────────────────────────────────────
 

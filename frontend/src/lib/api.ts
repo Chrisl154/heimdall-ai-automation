@@ -35,6 +35,8 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ message, session_id }),
       }),
+    conversation: (limit = 100) =>
+      request<{ entries: ConversationEntry[] }>(`/api/pm/conversation?limit=${limit}`),
   },
 
   tasks: {
@@ -378,6 +380,16 @@ export interface ModelEntry {
 export interface ModelsResponse {
   providers: Record<string, ProviderInfo>;
   all_models: ModelEntry[];
+}
+
+export interface ConversationEntry {
+  agent: "pm" | "worker" | "reviewer";
+  label: string;
+  content: string;
+  task_id: string;
+  iteration: number;
+  type: "prompt" | "response";
+  timestamp: number;
 }
 
 export interface SystemInfo {

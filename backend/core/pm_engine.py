@@ -36,7 +36,10 @@ class PMEngine:
         # SSE subscriber queues — each connected browser tab gets its own
         self._subscribers: list[asyncio.Queue[PipelineEvent]] = []
 
-        self._workflow = WorkflowEngine(self._event_queue)
+        # Shared conversation log — WorkflowEngine appends, exposed via API
+        self._conversation_log: list[dict] = []
+
+        self._workflow = WorkflowEngine(self._event_queue, self._conversation_log)
         self._chat_history: list[ChatMessage] = []
         self._task_mgr = None   # lazily imported to avoid circular deps
         self._notifier = None
@@ -261,6 +264,10 @@ class PMEngine:
             from core.task_manager import TaskManager
             self._task_mgr = TaskManager()
         return self._task_mgr
+
+    def get_conversation(self, limit: int = 100) -> list[dict]:
+        """Return the agent-to-agent conversation log (newest last)."""
+        return self._conversation_log[-limit:]
 
     def set_notifier(self, notifier) -> None:
         self._notifier = notifier
