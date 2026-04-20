@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, MessagingChannel, WebhookConfig, AgentConfig, AgentsConfig } from "@/lib/api";
-import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight, Send } from "lucide-react";
+import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight, Send, RefreshCw } from "lucide-react";
 
 type Tab = "providers" | "vault" | "channels" | "webhooks" | "restrictions";
 type ChannelType = "telegram" | "discord" | "email";
@@ -91,6 +91,8 @@ export default function SettingsPage() {
   const [savingAgent, setSavingAgent] = useState<Record<string, boolean>>({});
   const [savedAgent, setSavedAgent] = useState<string | null>(null);
   const [agentEdits, setAgentEdits] = useState<Record<string, { model: string; base_url: string }>>({});
+  const [detectedModels, setDetectedModels] = useState<Record<string, string[]>>({});
+  const [scanning, setScanning] = useState<Record<string, boolean>>({});
 
   const refreshConfig = async () => {
     setConfigLoading(true);
@@ -99,11 +101,29 @@ export default function SettingsPage() {
       setAgentsConfig(cfg);
       const edits: Record<string, { model: string; base_url: string }> = {};
       for (const [name, c] of Object.entries(cfg as AgentsConfig)) {
-        edits[name] = { model: (c as AgentConfig).model, base_url: (c as AgentConfig).base_url ?? "" };
+        // Don't pre-fill model — require scanning to confirm it exists
+        edits[name] = { model: "", base_url: (c as AgentConfig).base_url ?? "" };
       }
       setAgentEdits(edits);
     } catch { }
     setConfigLoading(false);
+  };
+
+  const scanAgentModels = async (name: string) => {
+    const baseUrl = agentEdits[name]?.base_url;
+    const provider = (agentsConfig as AgentsConfig)?.[name as keyof AgentsConfig]?.provider;
+    if (!baseUrl || !provider) return;
+    setScanning(s => ({ ...s, [name]: true }));
+    try {
+      const res = await api.models.scan();
+      const providerData = res.providers[provider];
+      if (providerData?.models?.length) {
+        setDetectedModels(d => ({ ...d, [name]: providerData.models }));
+      } else {
+        setDetectedModels(d => ({ ...d, [name]: [] }));
+      }
+    } catch { }
+    setScanning(s => ({ ...s, [name]: false }));
   };
 
   useEffect(() => {
@@ -314,30 +334,58 @@ export default function SettingsPage() {
                      )}
                    </div>
                    <div className="space-y-2">
-                     <div>
-                       <label className="text-xs text-muted-foreground block mb-1">Model</label>
-                       <input
-                        type="text"
-                        value={agentEdits[name]?.model ?? model}
-                        onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
-                        className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                        placeholder="e.g. qwen3.5:35b"
-                       />
-                     </div>
+                     {/* Current saved model (read-only) */}
+                     {model && (
+                       <p className="text-xs text-muted-foreground">
+                         Current: <span className="font-mono text-foreground/70">{model}</span>
+                       </p>
+                     )}
+                     {/* Base URL + Scan */}
                      <div>
                        <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
-                       <input
-                        type="text"
-                        value={agentEdits[name]?.base_url ?? baseUrl}
-                        onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
-                        className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                        placeholder="http://127.0.0.1:11434"
-                       />
+                       <div className="flex gap-2">
+                         <input
+                           type="text"
+                           value={agentEdits[name]?.base_url ?? baseUrl}
+                           onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
+                           className="flex-1 px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                           placeholder="http://127.0.0.1:11434"
+                         />
+                         <button
+                           onClick={() => scanAgentModels(name)}
+                           disabled={scanning[name] || !agentEdits[name]?.base_url}
+                           className="flex items-center gap-1 px-3 py-1.5 bg-secondary border border-border rounded text-xs hover:bg-secondary/70 disabled:opacity-40 transition-colors shrink-0"
+                           title="Scan provider for available models"
+                         >
+                           <RefreshCw className={`w-3 h-3 ${scanning[name] ? "animate-spin" : ""}`} />
+                           {scanning[name] ? "Scanning…" : "Scan"}
+                         </button>
+                       </div>
+                     </div>
+                     {/* Model — only populated after scan */}
+                     <div>
+                       <label className="text-xs text-muted-foreground block mb-1">Model</label>
+                       {detectedModels[name]?.length > 0 ? (
+                         <select
+                           value={agentEdits[name]?.model ?? ""}
+                           onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
+                           className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                         >
+                           <option value="">Select a model…</option>
+                           {detectedModels[name].map(m => (
+                             <option key={m} value={m}>{m}</option>
+                           ))}
+                         </select>
+                       ) : (
+                         <div className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm text-muted-foreground italic">
+                           {scanning[name] ? "Scanning…" : "Enter Base URL above and click Scan"}
+                         </div>
+                       )}
                      </div>
                      <button
-                      onClick={() => saveAgentConfig(name)}
-                      disabled={savingAgent[name]}
-                      className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
+                       onClick={() => saveAgentConfig(name)}
+                       disabled={savingAgent[name] || !agentEdits[name]?.model}
+                       className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
                      >
                        {savingAgent[name] ? "Saving…" : "Save"}
                      </button>
