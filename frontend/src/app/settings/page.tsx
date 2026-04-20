@@ -787,16 +787,13 @@ export default function SettingsPage() {
                   <CheckCircle2 className="w-3.5 h-3.5" /> Update complete!
                 </div>
                 <button
-                  onClick={() => window.location.reload()}
+                  onClick={() => {
+                    localStorage.removeItem("heimdall_token");
+                    window.location.href = "/login";
+                  }}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/80 transition-colors"
                 >
-                  <RotateCcw className="w-3 h-3" /> Reload page
-                </button>
-                <button
-                  onClick={() => { setUpdateLog([]); setUpdateDone(false); setUpdateError(""); }}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Clear log
+                  <RotateCcw className="w-3 h-3" /> Re-login
                 </button>
               </div>
             )}
