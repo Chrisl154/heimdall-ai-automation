@@ -49,6 +49,7 @@ echo "✓ Packages installed"
 
 echo ""
 echo "→ Building frontend (this may take 1-3 minutes)…"
+rm -rf .next out
 npm run build
 echo "✓ Frontend built"
 cd "$INSTALL_DIR"
