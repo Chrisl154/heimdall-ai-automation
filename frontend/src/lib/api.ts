@@ -120,6 +120,10 @@ export const api = {
 
   models: {
     scan: () => request<ModelsResponse>("/api/models"),
+    probe: (provider: string, url: string) =>
+      request<{ available: boolean; models: string[]; error?: string }>(
+        `/api/models/probe?provider=${encodeURIComponent(provider)}&url=${encodeURIComponent(url)}`
+      ),
   },
 
   setup: {

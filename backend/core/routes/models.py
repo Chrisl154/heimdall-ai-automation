@@ -138,6 +138,19 @@ def _safe(result, fallback: dict) -> dict:
     return result if isinstance(result, dict) else fallback
 
 
+@router.get("/probe")
+async def probe_provider(provider: str, url: str):
+    """Scan a single local provider at an explicit URL. Used by the settings UI scan button."""
+    if provider == "ollama":
+        result = await _scan_ollama(url)
+    elif provider == "lmstudio":
+        result = await _scan_lmstudio(url)
+    else:
+        return {"available": False, "models": [], "error": f"Unsupported provider for probe: {provider}"}
+
+    return result
+
+
 @router.get("")
 async def scan_models():
     """Scan all providers concurrently and return available models."""

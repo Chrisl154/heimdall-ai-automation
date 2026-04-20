@@ -110,19 +110,22 @@ export default function SettingsPage() {
   };
 
   const scanAgentModels = async (name: string) => {
-    const baseUrl = agentEdits[name]?.base_url;
+    const baseUrl = agentEdits[name]?.base_url?.trim();
     const provider = (agentsConfig as AgentsConfig)?.[name as keyof AgentsConfig]?.provider;
     if (!baseUrl || !provider) return;
     setScanning(s => ({ ...s, [name]: true }));
+    setDetectedModels(d => ({ ...d, [name]: [] }));
     try {
-      const res = await api.models.scan();
-      const providerData = res.providers[provider];
-      if (providerData?.models?.length) {
-        setDetectedModels(d => ({ ...d, [name]: providerData.models }));
+      const res = await api.models.probe(provider, baseUrl);
+      if (res.available && res.models?.length) {
+        setDetectedModels(d => ({ ...d, [name]: res.models }));
       } else {
         setDetectedModels(d => ({ ...d, [name]: [] }));
+        alert(`No models found at ${baseUrl}. Make sure the service is running and the URL is correct.`);
       }
-    } catch { }
+    } catch (e: unknown) {
+      alert(`Scan failed: ${e instanceof Error ? e.message : "Could not reach provider"}`);
+    }
     setScanning(s => ({ ...s, [name]: false }));
   };
 
