@@ -143,6 +143,24 @@ export const api = {
     summary: () => request<ProjectSummary>("/api/project/summary"),
   },
 
+  github: {
+    connect: (token: string) =>
+      request<{ valid: boolean; error?: string; username?: string; name?: string; avatar_url?: string; public_repos?: number }>(
+        "/api/github/connect", { method: "POST", body: JSON.stringify({ token }) }
+      ),
+    status: () => request<GHStatus>("/api/github/status"),
+    disconnect: () => request("/api/github/disconnect", { method: "DELETE" }),
+    repos: (page = 1, per_page = 30, sort = "updated") =>
+      request<GHRepo[]>(`/api/github/repos?page=${page}&per_page=${per_page}&sort=${sort}`),
+    clone: (repo_full_name: string, clone_url: string, set_active = true) =>
+      request<{ action: string; local_path: string; repo: string; active: boolean }>(
+        "/api/github/clone", { method: "POST", body: JSON.stringify({ repo_full_name, clone_url, set_active }) }
+      ),
+    setActive: (path: string) =>
+      request<{ active_project_path: string }>("/api/github/set-active", { method: "POST", body: JSON.stringify({ path }) }),
+    active: () => request<{ active_project_path: string | null }>("/api/github/active"),
+  },
+
   setup: {
     status: () => request<{ configured: boolean; has_vault_key: boolean; has_api_token: boolean }>("/api/setup/status"),
     init: (body: { vault_key: string; api_token: string; anthropic_key?: string; ollama_url?: string }) =>
@@ -355,6 +373,28 @@ export interface ModelEntry {
 export interface ModelsResponse {
   providers: Record<string, ProviderInfo>;
   all_models: ModelEntry[];
+}
+
+export interface GHStatus {
+  connected: boolean;
+  username?: string;
+  name?: string;
+  avatar_url?: string;
+  active_project?: string | null;
+  error?: string;
+}
+
+export interface GHRepo {
+  full_name: string;
+  name: string;
+  description: string;
+  private: boolean;
+  language: string | null;
+  stars: number;
+  updated_at: string;
+  clone_url: string;
+  ssh_url: string;
+  default_branch: string;
 }
 
 export interface ProjectSummary {

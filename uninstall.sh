@@ -148,8 +148,14 @@ if [[ "$PURGE" == "true" ]]; then
     fi
 else
     echo ""
-    echo "→ Runtime data kept (.env, data/, config/, tasks/, workspace/)."
-    echo "  Re-run with --purge to delete everything."
+    echo "→ The following are PRESERVED (your external connections are safe):"
+    echo "   .env          — vault encryption key + API token"
+    echo "   data/         — encrypted vault: API keys (Anthropic, OpenAI, Grok, DeepSeek, GitHub)"
+    echo "   config/       — settings: active project, agent config, provider URLs"
+    echo "   tasks/        — task backlog"
+    echo "   workspace/    — task output files"
+    echo ""
+    echo "  Re-run with --purge to delete ALL data including vault secrets."
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────

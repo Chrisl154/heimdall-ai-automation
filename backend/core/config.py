@@ -65,6 +65,26 @@ def load_config() -> dict[str, Any]:
     return _apply_env_overrides(cfg)
 
 
+def save_config(updates: dict) -> None:
+    """Merge updates into config/settings.yaml and invalidate the cache."""
+    config_dir = Path(os.getenv("HEIMDALL_CONFIG_DIR", "config"))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = config_dir / "settings.yaml"
+
+    if settings_path.exists():
+        with open(settings_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+
+    cfg.update(updates)
+
+    with open(settings_path, "w", encoding="utf-8") as f:
+        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+
+    load_config.cache_clear()
+
+
 def get(path: str, default: Any = None) -> Any:
     """Dot-separated config key access. e.g. get('pm.auto_commit', True)"""
     cfg = load_config()
