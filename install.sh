@@ -108,6 +108,17 @@ _pyok()  { local v; v=$(_pyver "$1"); local maj min; maj=${v%%.*}; min=${v##*.}
 
 if ! _pyok "$PYTHON_BIN"; then
     CURRENT_VER=$(_pyver "$PYTHON_BIN")
+    # Check if python3.11 (or newer) binary already exists before touching apt
+    for candidate in python3.13 python3.12 python3.11; do
+        if command -v "$candidate" &>/dev/null && _pyok "$candidate"; then
+            PYTHON_BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+if ! _pyok "$PYTHON_BIN"; then
+    CURRENT_VER=$(_pyver "$PYTHON_BIN")
     echo "→ Python $CURRENT_VER found — need 3.11+, attempting install..."
     case "$PKG_MGR" in
         apt)
@@ -115,7 +126,10 @@ if ! _pyok "$PYTHON_BIN"; then
                 apt-get install -y -qq software-properties-common
                 add-apt-repository -y ppa:deadsnakes/ppa
                 apt-get update -qq
-                apt-get install -y -qq python3.11 python3.11-venv python3.11-dev
+                # Use --no-install-recommends and force-overwrite to avoid RC/partial conflicts
+                apt-get install -y -qq --no-install-recommends \
+                    -o Dpkg::Options::="--force-overwrite" \
+                    python3.11 python3.11-venv python3.11-dev
             else
                 apt-get install -y -qq python3.11 python3.11-venv python3.11-dev 2>/dev/null || {
                     echo "✗ Python 3.11+ not available. Install manually and re-run."
