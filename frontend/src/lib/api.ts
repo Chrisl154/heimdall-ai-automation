@@ -146,6 +146,20 @@ export type TaskStatus =
   | "pending" | "in_progress" | "in_review" | "fixing"
   | "completed" | "failed" | "escalated";
 
+export interface ReviewIssue {
+  severity: string;
+  description: string;
+  location?: string;
+}
+
+export interface ReviewResult {
+  approved: boolean;
+  summary?: string;
+  issues?: ReviewIssue[];
+  feedback?: string;
+  iteration?: number;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -162,6 +176,7 @@ export interface Task {
   output_path: string;
   error?: string;
   latest_output?: string;
+  latest_review?: ReviewResult;
 }
 
 export interface CreateTaskBody {
