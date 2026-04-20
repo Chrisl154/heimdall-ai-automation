@@ -58,10 +58,10 @@ else
     git clone "$REPO_URL" "$INSTALL_DIR" --branch "$BRANCH" --depth 1
 fi
 
-APP_DIR="$INSTALL_DIR/AIAutomation"
+APP_DIR="$INSTALL_DIR"
 
-if [[ ! -d "$APP_DIR" ]]; then
-    echo "✗ Expected AIAutomation/ inside repo — repo structure may have changed."
+if [[ ! -f "$APP_DIR/install.sh" ]]; then
+    echo "✗ install.sh not found in $APP_DIR — repo structure may have changed."
     exit 1
 fi
 
