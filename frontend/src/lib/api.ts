@@ -143,6 +143,11 @@ export const api = {
     summary: () => request<ProjectSummary>("/api/project/summary"),
   },
 
+  system: {
+    info: () => request<SystemInfo>("/api/system/info"),
+    updateStream: () => `${BASE}/api/system/update`,
+  },
+
   github: {
     connect: (token: string) =>
       request<{ valid: boolean; error?: string; username?: string; name?: string; avatar_url?: string; public_repos?: number }>(
@@ -373,6 +378,17 @@ export interface ModelEntry {
 export interface ModelsResponse {
   providers: Record<string, ProviderInfo>;
   all_models: ModelEntry[];
+}
+
+export interface SystemInfo {
+  sha: string;
+  branch: string;
+  message: string;
+  author: string;
+  date: string;
+  commits_behind: number;
+  commits_ahead: number;
+  install_dir?: string;
 }
 
 export interface GHStatus {

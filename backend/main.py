@@ -103,6 +103,7 @@ from core.routes.setup import router as setup_router     # noqa: E402
 from core.routes.models import router as models_router     # noqa: E402
 from core.routes.project import router as project_router     # noqa: E402
 from core.routes.github import router as github_router       # noqa: E402
+from core.routes.system import router as system_router       # noqa: E402
 
 app.include_router(pm.router, dependencies=[Depends(require_token)])
 app.include_router(tasks.router, dependencies=[Depends(require_token)])
@@ -120,6 +121,7 @@ app.include_router(config_router, dependencies=[Depends(require_token)])
 app.include_router(models_router, dependencies=[Depends(require_token)])
 app.include_router(project_router, dependencies=[Depends(require_token)])
 app.include_router(github_router, dependencies=[Depends(require_token)])
+app.include_router(system_router, dependencies=[Depends(require_token)])
 app.include_router(setup_router)
 
 

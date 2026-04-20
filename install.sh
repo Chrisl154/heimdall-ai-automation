@@ -352,6 +352,8 @@ case "\$1" in
   open)
     xdg-open "http://${PUBLIC_HOST}:${PORT}" 2>/dev/null \
       || echo "Open http://${PUBLIC_HOST}:${PORT} in your browser" ;;
+  update)
+    bash "${INSTALL_DIR}/update.sh" ;;
   uninstall)
     echo "This will remove Heimdall services and CLI."
     echo "Your vault, API keys, GitHub token, and config will be PRESERVED."
@@ -361,7 +363,7 @@ case "\$1" in
     [[ "\$confirm" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
     sudo bash "${INSTALL_DIR}/uninstall.sh" "\${@:2}" ;;
   *)
-    echo "Usage: heimdall {start|stop|restart|status|logs|open|uninstall}"
+    echo "Usage: heimdall {start|stop|restart|status|logs|open|update|uninstall}"
     exit 1 ;;
 esac
 HEIMDALL_CLI

@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, MessagingChannel, WebhookConfig, AgentConfig, AgentsConfig } from "@/lib/api";
-import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight, Send, RefreshCw } from "lucide-react";
+import { Lock, Unlock, Save, Plus, Trash2, ToggleLeft, ToggleRight, Send, RefreshCw, Download, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
+import { SystemInfo } from "@/lib/api";
 
-type Tab = "providers" | "vault" | "channels" | "webhooks" | "restrictions";
+type Tab = "providers" | "vault" | "channels" | "webhooks" | "restrictions" | "system";
 type ChannelType = "telegram" | "discord" | "email";
 
 const PROVIDER_KEYS = [
@@ -146,6 +147,90 @@ export default function SettingsPage() {
       alert(`Error: ${e instanceof Error ? e.message : "Save failed"}`);
     }
     setSavingAgent(s => ({ ...s, [name]: false }));
+  };
+
+  // ── System / update state ────────────────────────────────────────────────────
+  const [sysInfo, setSysInfo]         = useState<SystemInfo | null>(null);
+  const [sysLoading, setSysLoading]   = useState(false);
+  const [updateLog, setUpdateLog]     = useState<{ type: string; message: string }[]>([]);
+  const [updating, setUpdating]       = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [updateDone, setUpdateDone]   = useState(false);
+  const [updateError, setUpdateError] = useState("");
+
+  const loadSysInfo = async () => {
+    setSysLoading(true);
+    try { setSysInfo(await api.system.info()); } catch { /* ignore */ }
+    setSysLoading(false);
+  };
+
+  useEffect(() => { if (tab === "system") loadSysInfo(); }, [tab]);
+
+  const startUpdate = async () => {
+    setUpdating(true);
+    setUpdateLog([]);
+    setUpdateDone(false);
+    setUpdateError("");
+    setReconnecting(false);
+
+    try {
+      const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const token = localStorage.getItem("heimdall_token") ?? "";
+      const res = await fetch(`${BASE}/api/system/update`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const dataLine = part.split("\n").find(l => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(6));
+            setUpdateLog(p => [...p, ev]);
+            if (ev.type === "restarting") {
+              setReconnecting(true);
+              // Poll /api/health until it responds
+              const poll = setInterval(async () => {
+                try {
+                  const h = await fetch(`${BASE}/api/health`);
+                  if (h.ok) {
+                    clearInterval(poll);
+                    setReconnecting(false);
+                    setUpdateDone(true);
+                    setUpdating(false);
+                    loadSysInfo();
+                  }
+                } catch { /* still down */ }
+              }, 2000);
+            }
+            if (ev.type === "done") {
+              setUpdateDone(true);
+              setUpdating(false);
+              loadSysInfo();
+            }
+            if (ev.type === "error") {
+              setUpdateError(ev.message);
+              setUpdating(false);
+            }
+          } catch { /* bad JSON line */ }
+        }
+      }
+    } catch (e: unknown) {
+      if (!reconnecting) {
+        setUpdateError(e instanceof Error ? e.message : "Update failed");
+        setUpdating(false);
+      }
+    }
   };
 
   // ── Restrictions state ───────────────────────────────────────────────────────
@@ -292,6 +377,7 @@ export default function SettingsPage() {
     { id: "channels", label: "Channels" },
     { id: "webhooks", label: "Webhooks" },
     { id: "restrictions", label: "Restrictions" },
+    { id: "system", label: "System" },
   ];
 
   return (
@@ -571,6 +657,117 @@ export default function SettingsPage() {
             <Save className="w-3 h-3" />
             {savingRestrictions ? "Saving…" : "Save Restrictions"}
           </button>
+        </div>
+      )}
+
+      {/* ── System tab ───────────────────────────────────────────────────────── */}
+      {tab === "system" && (
+        <div className="space-y-4 max-w-2xl">
+          {/* Version card */}
+          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Current Version</h3>
+              <button onClick={loadSysInfo} disabled={sysLoading}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-secondary border border-border rounded-lg hover:bg-secondary/70 disabled:opacity-50 transition-colors">
+                <RefreshCw className={`w-3.5 h-3.5 ${sysLoading ? "animate-spin" : ""}`} />
+                {sysLoading ? "Checking…" : "Check"}
+              </button>
+            </div>
+
+            {sysInfo ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 font-mono text-sm">
+                  <span className="text-primary">{sysInfo.sha}</span>
+                  <span className="text-muted-foreground">on</span>
+                  <span>{sysInfo.branch}</span>
+                </div>
+                <p className="text-sm">{sysInfo.message}</p>
+                <p className="text-xs text-muted-foreground">
+                  {sysInfo.author} · {new Date(sysInfo.date).toLocaleString()}
+                </p>
+                {sysInfo.commits_behind > 0 ? (
+                  <div className="flex items-center gap-2 text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 rounded-lg px-3 py-2">
+                    <Download className="w-3.5 h-3.5 shrink-0" />
+                    {sysInfo.commits_behind} commit{sysInfo.commits_behind !== 1 ? "s" : ""} behind remote — update available
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-green-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Up to date
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">{sysLoading ? "Fetching version info…" : "Click Check to load version info."}</p>
+            )}
+          </div>
+
+          {/* Update card */}
+          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <h3 className="text-sm font-semibold">Update &amp; Restart</h3>
+            <p className="text-xs text-muted-foreground">
+              Pulls the latest code, rebuilds the frontend, and restarts the service. Your vault, API keys, and config are untouched.
+            </p>
+
+            {!updating && !updateDone && !reconnecting && (
+              <button
+                onClick={startUpdate}
+                className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/80 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Update &amp; Restart
+              </button>
+            )}
+
+            {/* Log output */}
+            {(updating || reconnecting || updateLog.length > 0) && (
+              <div className="bg-background border border-border rounded-lg p-3 font-mono text-xs max-h-72 overflow-y-auto space-y-0.5">
+                {updateLog.map((line, i) => (
+                  <div key={i} className={
+                    line.type === "step"        ? "text-primary font-semibold mt-1" :
+                    line.type === "error"       ? "text-red-400" :
+                    line.type === "restarting"  ? "text-yellow-400" :
+                    line.type === "info"        ? "text-muted-foreground italic" :
+                    "text-foreground/70"
+                  }>
+                    {line.type === "step" ? `▶ ${line.message}` : `  ${line.message}`}
+                  </div>
+                ))}
+                {reconnecting && (
+                  <div className="text-yellow-400 animate-pulse mt-1">  ⟳ Waiting for service to come back up…</div>
+                )}
+              </div>
+            )}
+
+            {updateError && !reconnecting && (
+              <div className="flex items-center gap-2 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+                <XCircle className="w-3.5 h-3.5 shrink-0" /> {updateError}
+              </div>
+            )}
+
+            {updateDone && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-xs text-green-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Update complete!
+                </div>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/80 transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reload page
+                </button>
+                <button
+                  onClick={() => { setUpdateLog([]); setUpdateDone(false); setUpdateError(""); }}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Clear log
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Install info */}
+          {sysInfo?.install_dir && (
+            <p className="text-xs text-muted-foreground font-mono">Install dir: {sysInfo.install_dir}</p>
+          )}
         </div>
       )}
 
