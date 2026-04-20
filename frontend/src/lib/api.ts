@@ -117,6 +117,10 @@ export const api = {
 
   analytics: () => request<AnalyticsData>("/api/analytics"),
 
+  models: {
+    scan: () => request<ModelsResponse>("/api/models"),
+  },
+
   setup: {
     status: () => request<{ configured: boolean; has_vault_key: boolean; has_api_token: boolean }>("/api/setup/status"),
     init: (body: { vault_key: string; api_token: string; anthropic_key?: string; ollama_url?: string }) =>
@@ -306,6 +310,29 @@ export interface AgentConfigPatch {
   base_url?: string;
   temperature?: number;
   max_tokens?: number;
+}
+
+export interface ProviderInfo {
+  available: boolean;
+  models: string[];
+  no_key?: boolean;
+  base_url?: string;
+  type: "local" | "cloud";
+  label: string;
+  description: string;
+  key_name?: string;
+  key_url?: string;
+}
+
+export interface ModelEntry {
+  provider: string;
+  model: string;
+  label: string;
+}
+
+export interface ModelsResponse {
+  providers: Record<string, ProviderInfo>;
+  all_models: ModelEntry[];
 }
 
 export interface AnalyticsData {

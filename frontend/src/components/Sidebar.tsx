@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, Columns3, Settings, GitBranch, MessageSquare, ScrollText, FolderSearch, BarChart2, CalendarClock } from "lucide-react";
+import { Bot, Columns3, Settings, GitBranch, MessageSquare, ScrollText, FolderSearch, BarChart2, CalendarClock, Cpu } from "lucide-react";
 
 const nav = [
   { href: "/", label: "Chat", icon: MessageSquare },
@@ -10,6 +10,7 @@ const nav = [
   { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/schedule", label: "Schedules", icon: CalendarClock },
+  { href: "/models", label: "Models", icon: Cpu },
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/git", label: "Git", icon: GitBranch },
 ];

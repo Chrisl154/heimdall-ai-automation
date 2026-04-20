@@ -100,6 +100,7 @@ from scheduler import router as schedule_router     # noqa: E402
 from core.auth import require_token     # noqa: E402
 from core.routes.config import router as config_router     # noqa: E402
 from core.routes.setup import router as setup_router     # noqa: E402
+from core.routes.models import router as models_router     # noqa: E402
 
 app.include_router(pm.router, dependencies=[Depends(require_token)])
 app.include_router(tasks.router, dependencies=[Depends(require_token)])
@@ -114,6 +115,7 @@ app.include_router(analytics.router, dependencies=[Depends(require_token)])
 app.include_router(templates.router, dependencies=[Depends(require_token)])
 app.include_router(schedule_router)
 app.include_router(config_router, dependencies=[Depends(require_token)])
+app.include_router(models_router, dependencies=[Depends(require_token)])
 app.include_router(setup_router)
 
 
