@@ -353,7 +353,7 @@ case "\$1" in
     xdg-open "http://${PUBLIC_HOST}:${PORT}" 2>/dev/null \
       || echo "Open http://${PUBLIC_HOST}:${PORT} in your browser" ;;
   update)
-    bash "${INSTALL_DIR}/update.sh" ;;
+    bash "${INSTALL_DIR}/update.sh" "\${@:2}" ;;
   uninstall)
     echo "This will remove Heimdall services and CLI."
     echo "Your vault, API keys, GitHub token, and config will be PRESERVED."

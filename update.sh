@@ -7,6 +7,8 @@
 set -euo pipefail
 
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORCE=false
+for arg in "$@"; do [[ "$arg" == "--force" ]] && FORCE=true; done
 
 echo "=== Heimdall Update ==="
 echo "→ Install directory: $INSTALL_DIR"
@@ -20,9 +22,10 @@ git fetch --all
 PULL_OUT=$(git pull --ff-only 2>&1)
 echo "$PULL_OUT"
 
-if echo "$PULL_OUT" | grep -q "Already up to date"; then
+if echo "$PULL_OUT" | grep -q "Already up to date" && [[ "$FORCE" == "false" ]]; then
     echo ""
     echo "✓ Already up to date — no rebuild needed."
+    echo "  Run 'heimdall update --force' to rebuild anyway."
     exit 0
 fi
 echo "✓ Code updated"
