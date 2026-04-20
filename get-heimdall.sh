@@ -5,7 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50
 #   curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --uninstall
 #   curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --uninstall --purge
-set -e
+set -euo pipefail
 
 REPO_URL="https://github.com/Chrisl154/heimdall-ai-automation.git"
 INSTALL_DIR="/opt/heimdall"
@@ -31,7 +31,6 @@ if [[ "$UNINSTALL" == "true" ]]; then
         echo "✗ Heimdall not found at $INSTALL_DIR"
         exit 1
     fi
-    echo "=== Heimdall Uninstaller ==="
     if [[ "$PURGE" == "true" ]]; then
         bash "$INSTALL_DIR/uninstall.sh" --purge
     else
