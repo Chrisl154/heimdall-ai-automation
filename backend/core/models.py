@@ -43,10 +43,9 @@ class Task(BaseModel):
     max_review_iterations: int = 3
     current_iteration: int = 0
     output_path: str = ""
+    stream: str = "qwen"
     error: Optional[str] = None
-    # Latest worker output (populated during workflow)
     latest_output: Optional[str] = None
-    # Latest review result
     latest_review: Optional["ReviewResult"] = None
 
 

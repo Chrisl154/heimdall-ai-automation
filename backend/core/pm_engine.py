@@ -151,6 +151,88 @@ class PMEngine:
 
     # ── Chat interface ────────────────────────────────────────────────────────
 
+    _TASK_CMD_INSTRUCTIONS = (
+        "\n\n## Task Management Commands\n"
+        "You can create or modify tasks by including a JSON block wrapped in <heimdall-action> tags.\n"
+        "The block will be executed automatically. Do NOT describe what you're doing — just include it.\n\n"
+        "**Create a task:**\n"
+        "<heimdall-action>{\"action\":\"create_task\",\"title\":\"Task title\",\"description\":\"What Qwen should build\","
+        "\"priority\":\"high\",\"tags\":[\"backend\"],\"stream\":\"qwen\"}</heimdall-action>\n\n"
+        "**Update a task status:**\n"
+        "<heimdall-action>{\"action\":\"update_task\",\"task_id\":\"qwen-001\",\"status\":\"pending\"}</heimdall-action>\n\n"
+        "**Delete a task:**\n"
+        "<heimdall-action>{\"action\":\"delete_task\",\"task_id\":\"qwen-001\"}</heimdall-action>\n\n"
+        "Priority values: low | medium | high | critical. Stream: qwen (default) or claude.\n"
+        "After the block, continue your normal response text."
+    )
+
+    async def _execute_task_commands(self, reply: str) -> tuple[str, list[str]]:
+        """Parse and execute <heimdall-action> blocks in the LLM reply.
+        Returns (cleaned_reply, list_of_action_results)."""
+        import re
+        import uuid
+        from datetime import datetime, timezone
+
+        pattern = re.compile(r"<heimdall-action>(.*?)</heimdall-action>", re.DOTALL)
+        results: list[str] = []
+        mgr = self._get_task_mgr()
+
+        for match in pattern.finditer(reply):
+            raw = match.group(1).strip()
+            try:
+                cmd = json.loads(raw)
+                action = cmd.get("action", "")
+
+                if action == "create_task":
+                    task_id = f"task-{uuid.uuid4().hex[:8]}"
+                    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    task = Task(
+                        id=task_id,
+                        title=cmd.get("title", "Untitled"),
+                        description=cmd.get("description", ""),
+                        priority=cmd.get("priority", "medium"),
+                        status=TaskStatus.PENDING,
+                        created_at=now,
+                        tags=cmd.get("tags", []),
+                        stream=cmd.get("stream", "qwen"),
+                        output_path=cmd.get("output_path", f"workspace/current/{task_id}"),
+                        max_review_iterations=cmd.get("max_review_iterations", 3),
+                    )
+                    mgr.add_task(task)
+                    self._work_event.set()
+                    results.append(f"✓ Task created: [{task_id}] {task.title}")
+                    await self._emit(EventType.TASK_STARTED, task_id, f"PM created task: {task.title}")
+
+                elif action == "update_task":
+                    task_id = cmd.get("task_id", "")
+                    task = mgr.get_task(task_id)
+                    if not task:
+                        results.append(f"✗ Task not found: {task_id}")
+                        continue
+                    updates = {k: v for k, v in cmd.items() if k not in ("action", "task_id")}
+                    if "status" in updates:
+                        status_val = updates.pop("status")
+                        mgr.update_task(task_id, status=TaskStatus(status_val))
+                    if updates:
+                        mgr.update_task(task_id, **updates)
+                    results.append(f"✓ Task updated: {task_id}")
+
+                elif action == "delete_task":
+                    task_id = cmd.get("task_id", "")
+                    if mgr.delete_task(task_id):
+                        results.append(f"✓ Task deleted: {task_id}")
+                    else:
+                        results.append(f"✗ Task not found: {task_id}")
+
+                else:
+                    results.append(f"✗ Unknown action: {action}")
+
+            except (json.JSONDecodeError, Exception) as exc:
+                results.append(f"✗ Command error: {exc}")
+
+        cleaned = pattern.sub("", reply).strip()
+        return cleaned, results
+
     async def chat(self, message: str, session_id: str = "default") -> str:
         """Process a chat message from the GUI or a messaging channel."""
         from core.llm_providers import call_llm, LLMError
@@ -158,21 +240,24 @@ class PMEngine:
 
         self._chat_history.append(ChatMessage(role="user", content=message))
 
-        # Build context for the PM agent
         status = self.get_status()
         mgr = self._get_task_mgr()
         tasks = mgr.list_tasks()
-        pending = [t for t in tasks if t.status == TaskStatus.PENDING]
-        completed = [t for t in tasks if t.status == TaskStatus.COMPLETED]
 
+        task_list = "\n".join(
+            f"  [{t.id}] {t.status.value} — {t.title}"
+            for t in tasks[:20]
+        )
         context = (
             f"Current status: {'running' if status.running else 'stopped'}. "
             f"Tasks — pending: {status.tasks_pending}, "
+            f"active: {sum(1 for t in tasks if t.status == TaskStatus.IN_PROGRESS)}, "
             f"completed: {status.tasks_completed}, "
             f"escalated: {status.tasks_escalated}.\n"
+            f"Task list:\n{task_list or '  (none)'}\n"
         )
         if self._current_task_id:
-            context += f"Currently processing task: {self._current_task_id}.\n"
+            context += f"Currently processing: {self._current_task_id}.\n"
 
         agent_cfg = config.get("agents.orchestrator", {})
         vault = get_vault()
@@ -181,7 +266,11 @@ class PMEngine:
         base_url = agent_cfg.get("base_url") or None
         api_key = vault.get("anthropic_key") if provider == "anthropic" else None
 
-        system = agent_cfg.get("system_prompt", "") + f"\n\nSystem context:\n{context}"
+        system = (
+            agent_cfg.get("system_prompt", "")
+            + self._TASK_CMD_INSTRUCTIONS
+            + f"\n\nSystem context:\n{context}"
+        )
 
         history = [
             {"role": m.role, "content": m.content}
@@ -202,6 +291,11 @@ class PMEngine:
             )
         except LLMError as exc:
             reply = f"PM agent error: {exc}"
+
+        # Execute any task commands embedded in the reply
+        reply, action_results = await self._execute_task_commands(reply)
+        if action_results:
+            reply = reply + "\n\n" + "\n".join(action_results) if reply else "\n".join(action_results)
 
         self._chat_history.append(ChatMessage(role="assistant", content=reply))
         self._save_chat_history()

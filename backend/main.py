@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI):
     await messaging.start_all()
     logger.info("Messaging adapters started.")
 
+    # Auto-start PM so it begins processing the backlog immediately on boot
+    await pm.start()
+    logger.info("PM engine auto-started.")
+
     # Start scheduler
     from scheduler import TaskScheduler, set_scheduler
     from core.task_manager import TaskManager
