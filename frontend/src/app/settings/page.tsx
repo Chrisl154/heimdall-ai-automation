@@ -187,7 +187,7 @@ export default function SettingsPage() {
     setReconnecting(false);
 
     try {
-      const BASE = process.env.NEXT_PUBLIC_API_URL ?? `http://${window.location.hostname}:8000`;
+      const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
       const token = localStorage.getItem("heimdall_token") ?? "";
       const res = await fetch(`${BASE}/api/system/update`, {
         headers: { Authorization: `Bearer ${token}` },

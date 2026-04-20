@@ -223,7 +223,7 @@ npm install \
     || { echo "✗ npm install failed — see output above."; exit 1; }
 
 echo "→ Building frontend static export (may take a few minutes)..."
-NEXT_PUBLIC_API_URL="http://${PUBLIC_HOST}:${PORT}" npm run build \
+npm run build \
     || { echo "✗ Frontend build failed — see output above."; exit 1; }
 
 if [[ ! -d "$INSTALL_DIR/frontend/out" ]]; then

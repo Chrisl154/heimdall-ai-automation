@@ -1,7 +1,6 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ??
-  (typeof window !== "undefined"
-    ? `http://${window.location.hostname}:8000`
-    : "http://localhost:8000");
+// Empty string = same-origin (backend serves the frontend in production).
+// Set NEXT_PUBLIC_API_URL=http://localhost:8000 in .env.local for local dev.
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 const getToken = () => (typeof window !== "undefined" ? localStorage.getItem("heimdall_token") ?? "" : "");
 

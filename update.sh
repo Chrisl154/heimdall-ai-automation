@@ -49,9 +49,7 @@ echo "✓ Packages installed"
 
 echo ""
 echo "→ Building frontend (this may take 1-3 minutes)…"
-HOST=$(grep "^HEIMDALL_HOST=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "localhost")
-PORT=$(grep "^HEIMDALL_PORT=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "8000")
-NEXT_PUBLIC_API_URL="http://${HOST}:${PORT}" npm run build
+npm run build
 echo "✓ Frontend built"
 cd "$INSTALL_DIR"
 
