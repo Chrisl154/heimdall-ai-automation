@@ -9,10 +9,14 @@ Responsibilities:
   - Coordinate git commits on task completion
 """
 import asyncio
+import json
 import time
+from pathlib import Path
 from typing import Optional
 
 from core import config
+
+_CHAT_LOG_PATH = Path("logs/chat_history.json")
 from core.models import (
     ChatMessage,
     EventType,
@@ -36,11 +40,15 @@ class PMEngine:
         # SSE subscriber queues — each connected browser tab gets its own
         self._subscribers: list[asyncio.Queue[PipelineEvent]] = []
 
+        # Wakes the poll loop immediately when a task is added
+        self._work_event: asyncio.Event = asyncio.Event()
+
         # Shared conversation log — WorkflowEngine appends, exposed via API
         self._conversation_log: list[dict] = []
 
         self._workflow = WorkflowEngine(self._event_queue, self._conversation_log)
-        self._chat_history: list[ChatMessage] = []
+        self._chat_history: list[ChatMessage] = self._load_chat_history()
+        self._claude_unavailable_until: float = 0.0
         self._task_mgr = None   # lazily imported to avoid circular deps
         self._notifier = None
         self._webhook_dispatcher = None
@@ -74,7 +82,11 @@ class PMEngine:
             task = mgr.get_next_task()
 
             if task is None:
-                await asyncio.sleep(poll_interval)
+                self._work_event.clear()
+                try:
+                    await asyncio.wait_for(self._work_event.wait(), timeout=poll_interval)
+                except asyncio.TimeoutError:
+                    pass
                 continue
 
             await self._process_task(task)
@@ -85,6 +97,9 @@ class PMEngine:
         mgr = self._get_task_mgr()
         self._current_task_id = task.id
 
+        # Sync current rate-limit window to WorkflowEngine before each task
+        self._workflow.set_reviewer_unavailable(self._claude_unavailable_until)
+
         mgr.mark_in_progress(task.id)
         await self._emit(EventType.TASK_STARTED, task.id, f"Starting task: {task.title}")
         await self._notify(f"Starting task [{task.id}]: {task.title}")
@@ -94,10 +109,24 @@ class PMEngine:
 
             if result.status == "completed":
                 mgr.mark_completed(task.id, result.output)
-                await self._emit(EventType.TASK_COMPLETED, task.id, f"Task completed after {result.iterations} iteration(s)")
-                await self._notify(
-                    f"Task [{task.id}] *{task.title}* completed in {result.iterations} review cycle(s)."
-                )
+                rate_limited = result.review and result.review.summary == "__rate_limited__"
+                if rate_limited:
+                    self._claude_unavailable_until = time.time() + 1800
+                    self._workflow.set_reviewer_unavailable(self._claude_unavailable_until)
+                    await self._emit(
+                        EventType.TASK_COMPLETED, task.id,
+                        f"Task auto-approved (Claude rate-limited). Review pending — Claude paused for 30 min."
+                    )
+                    await self._notify(
+                        f"[RATE LIMITED] Task [{task.id}] *{task.title}* auto-approved — Claude quota exhausted. "
+                        f"Manual review recommended. Claude paused for 30 min.",
+                        urgent=True,
+                    )
+                else:
+                    await self._emit(EventType.TASK_COMPLETED, task.id, f"Task completed after {result.iterations} iteration(s)")
+                    await self._notify(
+                        f"Task [{task.id}] *{task.title}* completed in {result.iterations} review cycle(s)."
+                    )
                 await self._maybe_commit(task, result.output)
 
             elif result.status == "escalated":
@@ -175,6 +204,7 @@ class PMEngine:
             reply = f"PM agent error: {exc}"
 
         self._chat_history.append(ChatMessage(role="assistant", content=reply))
+        self._save_chat_history()
         await self._emit(EventType.PM_CHAT_RESPONSE, None, reply)
         return reply
 
@@ -265,9 +295,40 @@ class PMEngine:
             self._task_mgr = TaskManager()
         return self._task_mgr
 
+    # ── Chat history persistence ───────────────────────────────────────────────
+
+    def _load_chat_history(self) -> list[ChatMessage]:
+        try:
+            if _CHAT_LOG_PATH.exists():
+                data = json.loads(_CHAT_LOG_PATH.read_text(encoding="utf-8"))
+                return [ChatMessage(**m) for m in data]
+        except Exception as exc:
+            print(f"[PM] Could not load chat history: {exc}", flush=True)
+        return []
+
+    def _save_chat_history(self) -> None:
+        try:
+            _CHAT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _CHAT_LOG_PATH.write_text(
+                json.dumps([m.model_dump() for m in self._chat_history[-500:]], ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            print(f"[PM] Could not save chat history: {exc}", flush=True)
+
+    def get_chat_history(self) -> list[dict]:
+        """Return persisted user-PM chat history."""
+        return [m.model_dump() for m in self._chat_history]
+
     def get_conversation(self, limit: int = 100) -> list[dict]:
         """Return the agent-to-agent conversation log (newest last)."""
         return self._conversation_log[-limit:]
+
+    async def notify_task_added(self) -> None:
+        """Wake the poll loop and auto-start PM if it was idle."""
+        if not self._running:
+            await self.start()
+        self._work_event.set()
 
     def set_notifier(self, notifier) -> None:
         self._notifier = notifier

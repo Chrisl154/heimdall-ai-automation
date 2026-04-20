@@ -41,6 +41,10 @@ class WorkflowEngine:
     def __init__(self, event_queue: asyncio.Queue, conversation_log: list | None = None):
         self._queue = event_queue
         self._log: list = conversation_log if conversation_log is not None else []
+        self._skip_reviewer_until: float = 0.0
+
+    def set_reviewer_unavailable(self, until: float) -> None:
+        self._skip_reviewer_until = until
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -204,7 +208,18 @@ class WorkflowEngine:
         return output
 
     async def _call_reviewer(self, task: Task, worker_output: str, iteration: int) -> ReviewResult:
-        from core.llm_providers import call_llm, LLMError
+        import time as _time
+        if self._skip_reviewer_until > _time.time():
+            self._record("reviewer", "Reviewer (Claude)", "[SKIPPED] Claude unavailable — rate limit window active. Auto-approving.", task.id, iteration, "response")
+            return ReviewResult(
+                approved=True,
+                summary="__rate_limited__",
+                issues=[],
+                feedback="Claude unavailable (rate limit window). Auto-approved.",
+                iteration=iteration,
+            )
+
+        from core.llm_providers import call_llm, LLMError, ClaudeRateLimitError
         from core.vault import get_vault
 
         agent_cfg = config.get("agents.reviewer", {})
@@ -232,6 +247,15 @@ class WorkflowEngine:
                 api_key=api_key,
                 temperature=agent_cfg.get("temperature", 0.1),
                 max_tokens=agent_cfg.get("max_tokens", 4096),
+            )
+        except ClaudeRateLimitError:
+            self._record("reviewer", "Reviewer (Claude)", "[RATE LIMITED] Review skipped — Claude API quota exhausted. Task auto-approved pending manual review.", task.id, iteration, "response")
+            return ReviewResult(
+                approved=True,
+                summary="__rate_limited__",
+                issues=[],
+                feedback="Claude API rate-limited. Qwen output was auto-approved. Manual review recommended.",
+                iteration=iteration,
             )
         except LLMError as exc:
             raise RuntimeError(f"Reviewer LLM failed: {exc}") from exc

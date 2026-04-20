@@ -101,6 +101,12 @@ async def direct_chat(body: DirectChatRequest):
     return {"reply": reply, "provider": body.provider, "model": body.model, "session_id": body.session_id}
 
 
+@router.get("/chat/history")
+def get_chat_history():
+    """Return persisted user-PM chat history."""
+    return {"messages": get_pm().get_chat_history()}
+
+
 @router.get("/conversation")
 def get_conversation(limit: int = 100):
     """Return the agent-to-agent conversation log."""

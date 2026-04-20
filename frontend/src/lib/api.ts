@@ -39,6 +39,8 @@ export const api = {
       }),
     conversation: (limit = 100) =>
       request<{ entries: ConversationEntry[] }>(`/api/pm/conversation?limit=${limit}`),
+    chatHistory: () =>
+      request<{ messages: { role: string; content: string }[] }>("/api/pm/chat/history"),
   },
 
   tasks: {

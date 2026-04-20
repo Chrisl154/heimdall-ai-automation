@@ -1,6 +1,7 @@
 """
 Task CRUD routes — list, create, update, delete.
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -41,7 +42,7 @@ def get_task(task_id: str):
 
 
 @router.post("", response_model=Task, status_code=201)
-def create_task(body: TaskCreateRequest):
+async def create_task(body: TaskCreateRequest):
     task_id = f"task-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     task = Task(
@@ -57,6 +58,8 @@ def create_task(body: TaskCreateRequest):
         output_path=body.output_path or f"workspace/current/{task_id}",
     )
     _get_mgr().add_task(task)
+    from core.pm_engine import get_pm
+    asyncio.create_task(get_pm().notify_task_added())
     return task
 
 

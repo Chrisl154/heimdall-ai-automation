@@ -90,6 +90,22 @@ export default function ChatPage() {
 
   useEffect(() => { api.models.scan().then(setModelsData).catch(() => {}); }, []);
 
+  useEffect(() => {
+    api.pm.chatHistory().then(res => {
+      if (res.messages.length > 0) {
+        const loaded: Message[] = res.messages.map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          time: "",
+        }));
+        setMessages([
+          { role: "assistant", content: "Hello! I'm Heimdall, your AI Project Manager. You can ask me about task status, start/stop the pipeline, or give me new tasks.", time: now() },
+          ...loaded,
+        ]);
+      }
+    }).catch(() => {});
+  }, []);
+
   const loadConversation = useCallback(async () => {
     setConvLoading(true);
     try {

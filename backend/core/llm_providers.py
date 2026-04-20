@@ -20,6 +20,10 @@ class LLMError(Exception):
     """Raised when an LLM call fails after all retries."""
 
 
+class ClaudeRateLimitError(LLMError):
+    """Raised when Anthropic rate-limits us after all retries (all failures were 429)."""
+
+
 def _build_openai_messages(
     system: str, prompt: str, history: Optional[list[dict]]
 ) -> list[dict]:
@@ -61,6 +65,7 @@ async def _call_anthropic(
     }
 
     last_exc: Exception = LLMError("No attempts made")
+    all_rate_limited = True
     async with httpx.AsyncClient(timeout=120.0) as client:
         for i, delay in enumerate([0] + _BACKOFF):
             if delay:
@@ -71,7 +76,14 @@ async def _call_anthropic(
                     json=payload,
                     headers=headers,
                 )
-                if resp.status_code in (429,) or resp.status_code >= 500:
+                if resp.status_code == 429:
+                    last_exc = LLMError(
+                        f"Anthropic returned 429: {resp.text[:200]}"
+                    )
+                    logger.warning("Anthropic 429 rate-limit, retry %d/%d", i, len(_BACKOFF))
+                    continue
+                if resp.status_code >= 500:
+                    all_rate_limited = False
                     last_exc = LLMError(
                         f"Anthropic returned {resp.status_code}: {resp.text[:200]}"
                     )
@@ -81,8 +93,11 @@ async def _call_anthropic(
                 data = resp.json()
                 return data["content"][0]["text"]
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                all_rate_limited = False
                 last_exc = LLMError(f"Anthropic network error: {exc}")
                 logger.warning("Anthropic network error, retry %d/%d: %s", i, len(_BACKOFF), exc)
+    if all_rate_limited:
+        raise ClaudeRateLimitError(str(last_exc))
     raise last_exc
 
 

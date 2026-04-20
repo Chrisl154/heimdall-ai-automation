@@ -67,6 +67,11 @@ export default function ProjectPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const REFRESH_EVENTS = new Set([
+    "task_started", "task_completed", "task_failed", "task_escalated",
+    "review_approved", "pm_started", "pm_stopped",
+  ]);
+
   useEffect(() => {
     const unsub = subscribeToEvents((ev: PipelineEvent) => {
       setEvents(prev => [ev, ...prev].slice(0, 100));
@@ -77,9 +82,12 @@ export default function ProjectPage() {
           ...prev,
         ].slice(0, 200));
       }
+      if (REFRESH_EVENTS.has(ev.type)) {
+        load();
+      }
     });
     return unsub;
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     eventsRef.current?.scrollTo({ top: 0 });
