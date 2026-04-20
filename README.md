@@ -47,34 +47,21 @@ A self-orchestrating multi-AI pipeline. Gemma (LM Studio) acts as the project ma
 ### Linux — one-liner (curl)
 
 ```bash
-# Clone and install
-git clone https://github.com/Chrisl154/heimdall-ai-automation.git
-cd heimdall-ai-automation/AIAutomation
-
-# Local machine (localhost)
-sudo bash install.sh
+# Local machine (auto-detects your LAN IP)
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash
 
 # Remote / headless server — pass your server's IP or hostname
-sudo bash install.sh --host 192.168.1.50
-sudo bash install.sh --host heimdall.mydomain.com
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host heimdall.mydomain.com
 
 # Custom ports
-sudo bash install.sh --host 192.168.1.50 --backend-port 8000 --frontend-port 3000
-
-heimdall start
-# Open http://<your-host>:3000 — setup wizard runs automatically
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50 --backend-port 8000 --frontend-port 3000
 ```
 
-Or fetch and inspect before running:
+Then open `http://<your-host>:3000` — the setup wizard runs automatically.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/install.sh -o install.sh
-# Review, then:
-sudo bash install.sh --host <your-server-ip>
-```
-
-The installer:
-- Auto-detects your LAN IP if `--host` is omitted
+The bootstrap script (`get-heimdall.sh`):
+- Clones the repo to `/opt/heimdall` (or pulls if already present)
 - Builds the frontend with `NEXT_PUBLIC_API_URL` baked in for the correct host
 - Writes `CORS_ORIGINS` to `.env` so the backend accepts requests from the frontend origin
 - Installs **two** systemd services: `heimdall-backend` (FastAPI) and `heimdall-frontend` (Next.js)
@@ -84,10 +71,10 @@ The installer:
 
 ```bash
 # Remove services, CLI, and desktop entry — keep .env and data
-sudo bash uninstall.sh
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --uninstall
 
 # Remove everything including .env, vault, tasks, workspace, venv, node_modules
-sudo bash uninstall.sh --purge
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --uninstall --purge
 ```
 
 ---
