@@ -54,18 +54,18 @@ curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/ma
 curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50
 curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host heimdall.mydomain.com
 
-# Custom ports
-curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50 --backend-port 8000 --frontend-port 3000
+# Custom port (default: 8000)
+curl -fsSL https://raw.githubusercontent.com/Chrisl154/heimdall-ai-automation/master/get-heimdall.sh | sudo bash -s -- --host 192.168.1.50 --port 8080
 ```
 
-Then open `http://<your-host>:3000` — the setup wizard runs automatically.
+Then open `http://<your-host>:8000` — the setup wizard runs automatically.
 
 The bootstrap script (`get-heimdall.sh`):
 - Clones the repo to `/opt/heimdall` (or pulls if already present)
-- Builds the frontend with `NEXT_PUBLIC_API_URL` baked in for the correct host
-- Writes `CORS_ORIGINS` to `.env` so the backend accepts requests from the frontend origin
-- Installs **two** systemd services: `heimdall-backend` (FastAPI) and `heimdall-frontend` (Next.js)
-- Both start on boot automatically
+- Builds the frontend as a static export with `NEXT_PUBLIC_API_URL` baked in
+- The FastAPI backend serves both the API **and** the static frontend — one service, one port
+- Auto-generates `HEIMDALL_VAULT_KEY`, `HEIMDALL_SECRET_KEY`, and `HEIMDALL_API_TOKEN`
+- Installs a single systemd service: `heimdall-backend` (starts on boot)
 
 ### Uninstall
 
