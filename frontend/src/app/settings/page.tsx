@@ -264,10 +264,10 @@ export default function SettingsPage() {
   };
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: "providers",    label: "AI Providers" },
-    { id: "vault",        label: "Vault" },
-    { id: "channels",     label: "Channels" },
-    { id: "webhooks",     label: "Webhooks" },
+    { id: "providers", label: "AI Providers" },
+    { id: "vault", label: "Vault" },
+    { id: "channels", label: "Channels" },
+    { id: "webhooks", label: "Webhooks" },
     { id: "restrictions", label: "Restrictions" },
   ];
 
@@ -292,50 +292,54 @@ export default function SettingsPage() {
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">Agent Configuration</h3>
             {configLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-            {!configLoading && agentsConfig && Object.entries(agentsConfig).map(([name, cfg]) => (
-              <div key={name} className="bg-card rounded-xl border border-border p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-sm font-medium">{AGENT_LABELS[name] ?? name}</p>
-                    <span className="text-xs bg-secondary px-2 py-0.5 rounded text-muted-foreground">
-                      {(cfg as AgentConfig).provider}
-                    </span>
+            {!configLoading && agentsConfig && Object.entries(agentsConfig).map(([name, cfg]) => {
+              const agentConfig = cfg as AgentConfig;
+              const provider = agentConfig.provider ?? "unknown";
+              return (
+                <div key={name} className="bg-card rounded-xl border border-border p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-sm font-medium">{AGENT_LABELS[name] ?? name}</p>
+                      <span className="text-xs bg-secondary px-2 py-0.5 rounded text-muted-foreground">
+                        {provider}
+                      </span>
+                    </div>
+                    {savedAgent === name && (
+                      <span className="text-xs text-green-400">Saved!</span>
+                    )}
                   </div>
-                  {savedAgent === name && (
-                    <span className="text-xs text-green-400">Saved!</span>
-                  )}
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Model</label>
+                      <input
+                        type="text"
+                        value={agentEdits[name]?.model ?? agentConfig.model ?? ""}
+                        onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
+                        className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                        placeholder="e.g. qwen3.5:35b"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
+                      <input
+                        type="text"
+                        value={agentEdits[name]?.base_url ?? agentConfig.base_url ?? ""}
+                        onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
+                        className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
+                        placeholder="http://127.0.0.1:11434"
+                      />
+                    </div>
+                    <button
+                      onClick={() => saveAgentConfig(name)}
+                      disabled={savingAgent[name]}
+                      className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
+                    >
+                      {savingAgent[name] ? "Saving…" : "Save"}
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Model</label>
-                    <input
-                      type="text"
-                      value={agentEdits[name]?.model ?? (cfg as AgentConfig).model}
-                      onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], model: e.target.value } }))}
-                      className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                      placeholder="e.g. qwen3.5:35b"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Base URL</label>
-                    <input
-                      type="text"
-                      value={agentEdits[name]?.base_url ?? (cfg as AgentConfig).base_url ?? ""}
-                      onChange={e => setAgentEdits(ed => ({ ...ed, [name]: { ...ed[name], base_url: e.target.value } }))}
-                      className="w-full px-3 py-1.5 bg-input border border-border rounded text-sm outline-none focus:border-primary"
-                      placeholder="http://127.0.0.1:11434"
-                    />
-                  </div>
-                  <button
-                    onClick={() => saveAgentConfig(name)}
-                    disabled={savingAgent[name]}
-                    className="w-full py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded text-xs disabled:opacity-40 transition-colors"
-                  >
-                    {savingAgent[name] ? "Saving…" : "Save"}
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* API key rows */}
