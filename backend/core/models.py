@@ -167,3 +167,10 @@ class PMStatusResponse(BaseModel):
     tasks_failed: int = 0
     tasks_escalated: int = 0
     uptime_seconds: float = 0.0
+
+
+class DirectChatRequest(BaseModel):
+    message: str
+    provider: str
+    model: str
+    session_id: str = "default"

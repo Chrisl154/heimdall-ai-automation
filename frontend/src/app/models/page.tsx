@@ -4,7 +4,7 @@ import { api, ModelsResponse, ProviderInfo, AgentsConfig } from "@/lib/api";
 import {
   RefreshCw, ChevronDown, ChevronRight, CheckCircle2,
   XCircle, AlertCircle, ExternalLink, Server, Cloud,
-  Cpu, Zap,
+  Cpu, Zap, KeyRound, Loader2,
 } from "lucide-react";
 
 const PROVIDER_ORDER = ["ollama", "lmstudio", "anthropic", "openai", "grok", "deepseek"];
@@ -48,6 +48,10 @@ export default function ModelsPage() {
   const [saved, setSaved]       = useState<Record<string, boolean>>({});
   const [drafts, setDrafts]     = useState<Record<string, { provider: string; model: string }>>({});
   const [error, setError]       = useState("");
+  const [connecting, setConnecting]   = useState<Record<string, boolean>>({});
+  const [draftKey, setDraftKey]       = useState<Record<string, string>>({});
+  const [validating, setValidating]   = useState<Record<string, boolean>>({});
+  const [connectErr, setConnectErr]   = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,6 +94,26 @@ export default function ModelsPage() {
       alert(e instanceof Error ? e.message : "Save failed");
     }
     setSaving(p => ({ ...p, [name]: false }));
+  };
+
+  const connectProvider = async (key: string) => {
+    const apiKey = draftKey[key]?.trim();
+    if (!apiKey) return;
+    setValidating(p => ({ ...p, [key]: true }));
+    setConnectErr(p => ({ ...p, [key]: "" }));
+    try {
+      const res = await api.models.validateKey(key, apiKey);
+      if (res.valid) {
+        setConnecting(p => ({ ...p, [key]: false }));
+        setDraftKey(p => ({ ...p, [key]: "" }));
+        await load();
+      } else {
+        setConnectErr(p => ({ ...p, [key]: res.error ?? "Invalid API key" }));
+      }
+    } catch (e: unknown) {
+      setConnectErr(p => ({ ...p, [key]: e instanceof Error ? e.message : "Validation failed" }));
+    }
+    setValidating(p => ({ ...p, [key]: false }));
   };
 
   const availableModels = data
@@ -296,25 +320,64 @@ export default function ModelsPage() {
                       </div>
                     )}
 
-                    {/* No key warning for cloud */}
+                    {/* No key — Connect form for cloud providers */}
                     {prov.no_key && prov.type === "cloud" && (
-                      <div className="flex items-start gap-2 bg-yellow-400/10 border border-yellow-400/20 rounded-lg px-3 py-2">
-                        <AlertCircle className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-yellow-400">
-                            No API key configured. Add <code className="font-mono">{prov.key_name}</code> in Settings → Vault.
-                          </p>
-                          {prov.key_url && (
-                            <a
-                              href={prov.key_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-yellow-400/80 hover:text-yellow-400 mt-1"
+                      <div className="space-y-2">
+                        {!connecting[key] ? (
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 text-xs text-yellow-400">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              No API key configured.
+                            </div>
+                            {prov.key_url && (
+                              <a href={prov.key_url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                                Get key <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                            <button
+                              onClick={() => setConnecting(p => ({ ...p, [key]: true }))}
+                              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/80 transition-colors"
                             >
-                              Get API key <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
-                        </div>
+                              <KeyRound className="w-3 h-3" /> Connect
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3 space-y-2">
+                            <p className="text-xs text-yellow-400 font-medium">Connect {prov.label}</p>
+                            {prov.key_url && (
+                              <a href={prov.key_url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                                Get your API key from {prov.label} <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                            <input
+                              type="password"
+                              placeholder={`Paste your ${prov.key_name ?? "api_key"} here…`}
+                              value={draftKey[key] ?? ""}
+                              onChange={e => setDraftKey(p => ({ ...p, [key]: e.target.value }))}
+                              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            {connectErr[key] && (
+                              <p className="text-xs text-red-400">{connectErr[key]}</p>
+                            )}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => connectProvider(key)}
+                                disabled={!draftKey[key]?.trim() || validating[key]}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg hover:bg-primary/80 disabled:opacity-50 transition-colors"
+                              >
+                                {validating[key] ? <><Loader2 className="w-3 h-3 animate-spin" /> Validating…</> : "Validate & Connect"}
+                              </button>
+                              <button
+                                onClick={() => { setConnecting(p => ({ ...p, [key]: false })); setConnectErr(p => ({ ...p, [key]: "" })); }}
+                                className="px-3 py-1.5 text-xs bg-secondary border border-border rounded-lg hover:bg-secondary/70 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

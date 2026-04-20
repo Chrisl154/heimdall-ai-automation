@@ -124,6 +124,23 @@ export const api = {
       request<{ available: boolean; models: string[]; error?: string }>(
         `/api/models/probe?provider=${encodeURIComponent(provider)}&url=${encodeURIComponent(url)}`
       ),
+    validateKey: (provider: string, api_key: string) =>
+      request<{ valid: boolean; models: string[]; error: string | null }>(
+        "/api/models/validate-key",
+        { method: "POST", body: JSON.stringify({ provider, api_key }) }
+      ),
+  },
+
+  chat: {
+    direct: (message: string, provider: string, model: string, session_id = "default") =>
+      request<{ reply: string; provider: string; model: string; session_id: string }>(
+        "/api/pm/chat/direct",
+        { method: "POST", body: JSON.stringify({ message, provider, model, session_id }) }
+      ),
+  },
+
+  project: {
+    summary: () => request<ProjectSummary>("/api/project/summary"),
   },
 
   setup: {
@@ -338,6 +355,22 @@ export interface ModelEntry {
 export interface ModelsResponse {
   providers: Record<string, ProviderInfo>;
   all_models: ModelEntry[];
+}
+
+export interface ProjectSummary {
+  git: {
+    repo: string;
+    branch: string;
+    clean: boolean;
+    staged: string[];
+    unstaged: string[];
+    recent_commits: GitCommit[];
+  };
+  tasks: {
+    counts: { active: number; pending: number; completed: number; failed: number; escalated: number };
+    active: { id: string; title: string; priority: string; status: string; tags: string[] }[];
+    next_up: { id: string; title: string; priority: string; status: string; tags: string[] }[];
+  };
 }
 
 export interface AnalyticsData {

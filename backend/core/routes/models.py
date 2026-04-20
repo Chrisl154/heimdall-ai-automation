@@ -8,7 +8,8 @@ import os
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from core.config import load_config
 from core.vault import Vault
@@ -136,6 +137,75 @@ async def _scan_deepseek(api_key: Optional[str]) -> dict:
 
 def _safe(result, fallback: dict) -> dict:
     return result if isinstance(result, dict) else fallback
+
+
+class ValidateKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+_KEY_NAMES = {
+    "anthropic": "anthropic_key",
+    "openai": "openai_key",
+    "grok": "grok_key",
+    "deepseek": "deepseek_key",
+}
+
+_VALIDATE_URLS = {
+    "openai": "https://api.openai.com/v1/models",
+    "grok": "https://api.x.ai/v1/models",
+    "deepseek": "https://api.deepseek.com/v1/models",
+}
+
+
+@router.post("/validate-key")
+async def validate_and_save_key(body: ValidateKeyRequest):
+    """Validate an API key against the provider, then persist it to the vault."""
+    provider = body.provider
+    api_key = body.api_key.strip()
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    if provider not in _KEY_NAMES:
+        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not use API keys")
+
+    valid = False
+    models: list[str] = []
+    error: Optional[str] = None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if provider == "anthropic":
+                r = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+                )
+                valid = r.status_code == 200
+                if valid:
+                    models = [m["id"] for m in r.json().get("data", [])]
+                elif r.status_code == 401:
+                    error = "Invalid API key"
+                else:
+                    error = f"Anthropic returned {r.status_code}"
+            else:
+                url = _VALIDATE_URLS[provider]
+                r = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+                valid = r.status_code == 200
+                if valid:
+                    models = [m["id"] for m in r.json().get("data", [])]
+                elif r.status_code == 401:
+                    error = "Invalid API key"
+                else:
+                    error = f"Provider returned {r.status_code}"
+    except httpx.TimeoutException:
+        error = "Request timed out — check your network connection"
+    except httpx.NetworkError as exc:
+        error = f"Network error: {exc}"
+
+    if valid:
+        Vault().set(_KEY_NAMES[provider], api_key)
+
+    return {"valid": valid, "models": models, "error": error}
 
 
 @router.get("/probe")
