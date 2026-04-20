@@ -61,11 +61,12 @@ class PMEngine:
         self._running = True
         self._start_time = time.time()
 
-        await self._emit(EventType.PM_STARTED, None, "Heimdall PM started")
-        await self._notify("Heimdall PM started and watching the task queue.")
-
+        # Start loops first — notifications must never block the pipeline
         asyncio.create_task(self._run_loop())
         asyncio.create_task(self._fan_out_loop())
+
+        await self._emit(EventType.PM_STARTED, None, "Heimdall PM started")
+        await self._notify("Heimdall PM started and watching the task queue.")
 
     async def stop(self) -> None:
         self._running = False

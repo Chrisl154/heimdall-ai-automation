@@ -48,6 +48,13 @@ class NotificationRouter:
     def configure(self, settings: dict) -> None:
         self._settings = settings.get("notifications", {})
 
+    async def broadcast(self, text: str, urgent: bool = False) -> None:
+        """Send a plain-text notification to all enabled channels."""
+        try:
+            await self._mgr.broadcast(text, urgent=urgent)
+        except Exception as exc:
+            logger.warning("Notification broadcast failed: %s", exc)
+
     async def handle_event(self, event: PipelineEvent) -> None:
         if event.type not in _NOTIFICATION_EVENTS:
             return
