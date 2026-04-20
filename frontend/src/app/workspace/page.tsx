@@ -145,9 +145,9 @@ export default function WorkspacePage() {
                   }
                 </div>
                 {selected.latest_review.summary && <p className="text-xs text-muted-foreground">{selected.latest_review.summary}</p>}
-                {selected.latest_review.issues?.length > 0 && (
+                {(selected.latest_review.issues?.length ?? 0) > 0 && (
                   <ul className="space-y-1">
-                    {selected.latest_review.issues.map((issue: { severity: string; description: string; location?: string }, i: number) => (
+                    {selected.latest_review.issues!.map((issue: { severity: string; description: string; location?: string }, i: number) => (
                       <li key={i} className="text-xs flex gap-2">
                         <span className={`shrink-0 font-medium ${issue.severity === "critical" ? "text-red-400" : issue.severity === "major" ? "text-orange-400" : "text-yellow-400"}`}>
                           [{issue.severity}]
