@@ -257,7 +257,6 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
     sed -i "s|^HEIMDALL_API_TOKEN=.*|HEIMDALL_API_TOKEN=${API_TOKEN}|"     "$INSTALL_DIR/.env"
     sed -i "s|^HEIMDALL_HOST=.*|HEIMDALL_HOST=0.0.0.0|"                    "$INSTALL_DIR/.env"
     sed -i "s|^HEIMDALL_PORT=.*|HEIMDALL_PORT=${PORT}|"                    "$INSTALL_DIR/.env"
-    # Frontend is served same-origin — CORS only needed for external clients
     echo "CORS_ORIGINS=http://${PUBLIC_HOST}:${PORT},http://localhost:${PORT}" \
         >> "$INSTALL_DIR/.env"
     echo "✓ .env created — vault key, secret key, and API token auto-generated"
@@ -275,6 +274,9 @@ else
     fi
     echo "→ .env already exists — kept"
 fi
+
+# Read final token for display at end (works for both new and existing .env)
+API_TOKEN=$(grep "^HEIMDALL_API_TOKEN=" "$INSTALL_DIR/.env" | cut -d= -f2)
 
 # ── Disable and remove legacy frontend service if present ────────────────────
 
@@ -313,24 +315,40 @@ systemctl daemon-reload
 systemctl enable heimdall-backend
 echo "✓ heimdall-backend service installed and enabled"
 
+# ── Sudoers rule — passwordless systemctl for heimdall ───────────────────────
+
+SYSTEMCTL_BIN=$(which systemctl)
+JOURNALCTL_BIN=$(which journalctl)
+cat > /etc/sudoers.d/heimdall <<EOF
+# Allow any user to manage Heimdall without a password prompt
+ALL ALL=(ALL) NOPASSWD: ${SYSTEMCTL_BIN} start heimdall-backend
+ALL ALL=(ALL) NOPASSWD: ${SYSTEMCTL_BIN} stop heimdall-backend
+ALL ALL=(ALL) NOPASSWD: ${SYSTEMCTL_BIN} restart heimdall-backend
+ALL ALL=(ALL) NOPASSWD: ${SYSTEMCTL_BIN} status heimdall-backend
+ALL ALL=(ALL) NOPASSWD: ${JOURNALCTL_BIN} -u heimdall-backend *
+ALL ALL=(ALL) NOPASSWD: ${JOURNALCTL_BIN} -u heimdall-backend -f
+EOF
+chmod 0440 /etc/sudoers.d/heimdall
+echo "✓ Sudoers rule installed — heimdall CLI works without password"
+
 # ── heimdall CLI ──────────────────────────────────────────────────────────────
 
 cat > /usr/local/bin/heimdall <<HEIMDALL_CLI
 #!/usr/bin/env bash
 case "\$1" in
   start)
-    systemctl start heimdall-backend
+    sudo systemctl start heimdall-backend
     echo "Heimdall started — http://${PUBLIC_HOST}:${PORT}" ;;
   stop)
-    systemctl stop heimdall-backend
+    sudo systemctl stop heimdall-backend
     echo "Heimdall stopped." ;;
   restart)
-    systemctl restart heimdall-backend
+    sudo systemctl restart heimdall-backend
     echo "Heimdall restarted." ;;
   status)
-    systemctl status heimdall-backend --no-pager ;;
+    sudo systemctl status heimdall-backend --no-pager ;;
   logs)
-    journalctl -u heimdall-backend -f ;;
+    sudo journalctl -u heimdall-backend -f ;;
   open)
     xdg-open "http://${PUBLIC_HOST}:${PORT}" 2>/dev/null \
       || echo "Open http://${PUBLIC_HOST}:${PORT} in your browser" ;;
@@ -382,6 +400,9 @@ echo ""
 echo "  Open:     http://${PUBLIC_HOST}:${PORT}"
 echo "  API docs: http://${PUBLIC_HOST}:${PORT}/docs"
 echo ""
+echo "  API Token (copy this — needed for first login):"
+echo "  ${API_TOKEN}"
+echo ""
 echo "  heimdall start    — start"
 echo "  heimdall stop     — stop"
 echo "  heimdall restart  — restart"
@@ -389,6 +410,7 @@ echo "  heimdall status   — check health"
 echo "  heimdall logs     — follow logs"
 echo ""
 echo "  Setup wizard runs automatically on first visit."
+echo "  Token is also saved in: $INSTALL_DIR/.env"
 echo ""
 
 if command -v ufw &>/dev/null; then

@@ -89,11 +89,16 @@ for pattern in "uvicorn main:app" "next start"; do
     done
 done
 
-# ── Remove CLI and desktop entry ──────────────────────────────────────────────
+# ── Remove CLI, sudoers rule, and desktop entry ───────────────────────────────
 
 if [[ -f /usr/local/bin/heimdall ]]; then
     rm -f /usr/local/bin/heimdall
     echo "✓ heimdall CLI removed"
+fi
+
+if [[ -f /etc/sudoers.d/heimdall ]]; then
+    rm -f /etc/sudoers.d/heimdall
+    echo "✓ Sudoers rule removed"
 fi
 
 if [[ -f /usr/share/applications/heimdall.desktop ]]; then
