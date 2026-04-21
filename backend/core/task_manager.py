@@ -31,20 +31,31 @@ class TaskManager:
         path = self._dir / "backlog.yaml"
         if not path.exists():
             return
-        with open(path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or []
+        content = path.read_text(encoding="utf-8")
+        needs_migration = False
+        try:
+            raw = yaml.safe_load(content) or []
+        except yaml.constructor.ConstructorError:
+            # File has Python object tags from a prior yaml.dump() — migrate
+            print("[TaskManager] backlog.yaml has Python tags — migrating to clean format…")
+            raw = yaml.unsafe_load(content) or []
+            needs_migration = True
         if not isinstance(raw, list):
             return
         for item in raw:
             try:
-                task = Task(**item)
+                task = Task(**item) if isinstance(item, dict) else item
                 self._tasks[task.id] = task
             except Exception as exc:
                 print(f"[TaskManager] Skipping malformed task entry: {exc}")
+        if needs_migration:
+            self._flush()
+            print("[TaskManager] Migration complete.")
 
     def _flush(self) -> None:
         path = self._dir / "backlog.yaml"
-        data = [t.model_dump() for t in self._tasks.values()]
+        # mode='json' serializes enums as plain strings — never writes Python object tags
+        data = [t.model_dump(mode="json") for t in self._tasks.values()]
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, allow_unicode=True, sort_keys=False)
 
