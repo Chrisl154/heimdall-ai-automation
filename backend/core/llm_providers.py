@@ -4,6 +4,7 @@ LLM provider implementations.
 Supported providers: anthropic | ollama | lmstudio | openai | openai_compat
 
 Exponential backoff: 5, 10, 20, 40, 80 s on 429/5xx.
+All calls return (text, stats_dict) where stats_dict has input_tokens, output_tokens.
 """
 import asyncio
 import logging
@@ -14,6 +15,14 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _BACKOFF = [5, 10, 20, 40, 80]
+
+# Updated on every successful or rate-limited Anthropic response
+_claude_rate_info: dict = {}
+
+
+def get_claude_rate_info() -> dict:
+    """Return the most recent Claude API rate-limit headers."""
+    return dict(_claude_rate_info)
 
 
 class LLMError(Exception):
@@ -36,6 +45,25 @@ def _build_openai_messages(
     return messages
 
 
+def _extract_rate_headers(headers: httpx.Headers) -> None:
+    """Store Anthropic rate-limit headers globally so the UI can display them."""
+    global _claude_rate_info
+    info: dict = {}
+    for key in (
+        "anthropic-ratelimit-tokens-limit",
+        "anthropic-ratelimit-tokens-remaining",
+        "anthropic-ratelimit-tokens-reset",
+        "anthropic-ratelimit-requests-limit",
+        "anthropic-ratelimit-requests-remaining",
+        "anthropic-ratelimit-requests-reset",
+    ):
+        val = headers.get(key)
+        if val:
+            info[key.replace("anthropic-ratelimit-", "")] = val
+    if info:
+        _claude_rate_info = info
+
+
 async def _call_anthropic(
     prompt: str,
     system: str,
@@ -44,7 +72,7 @@ async def _call_anthropic(
     temperature: float,
     max_tokens: int,
     history: Optional[list[dict]],
-) -> str:
+) -> tuple[str, dict]:
     messages: list[dict] = []
     if history:
         messages.extend(history)
@@ -76,6 +104,7 @@ async def _call_anthropic(
                     json=payload,
                     headers=headers,
                 )
+                _extract_rate_headers(resp.headers)
                 if resp.status_code == 429:
                     last_exc = LLMError(
                         f"Anthropic returned 429: {resp.text[:200]}"
@@ -91,7 +120,12 @@ async def _call_anthropic(
                     continue
                 resp.raise_for_status()
                 data = resp.json()
-                return data["content"][0]["text"]
+                usage = data.get("usage", {})
+                stats = {
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                }
+                return data["content"][0]["text"], stats
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 all_rate_limited = False
                 last_exc = LLMError(f"Anthropic network error: {exc}")
@@ -109,7 +143,7 @@ async def _call_ollama(
     temperature: float,
     max_tokens: int,
     history: Optional[list[dict]],
-) -> str:
+) -> tuple[str, dict]:
     messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -137,7 +171,12 @@ async def _call_ollama(
                     logger.warning("Ollama %s, retry %d/%d", resp.status_code, i, len(_BACKOFF))
                     continue
                 resp.raise_for_status()
-                return resp.json()["message"]["content"]
+                data = resp.json()
+                stats = {
+                    "input_tokens": data.get("prompt_eval_count", 0),
+                    "output_tokens": data.get("eval_count", 0),
+                }
+                return data["message"]["content"], stats
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = LLMError(f"Ollama network error: {exc}")
                 logger.warning("Ollama network error, retry %d/%d: %s", i, len(_BACKOFF), exc)
@@ -153,7 +192,7 @@ async def _call_openai_compat(
     temperature: float,
     max_tokens: int,
     history: Optional[list[dict]],
-) -> str:
+) -> tuple[str, dict]:
     messages = _build_openai_messages(system, prompt, history)
     payload = {
         "model": model,
@@ -178,7 +217,13 @@ async def _call_openai_compat(
                     logger.warning("OpenAI-compat %s, retry %d/%d", resp.status_code, i, len(_BACKOFF))
                     continue
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                data = resp.json()
+                usage = data.get("usage", {})
+                stats = {
+                    "input_tokens": usage.get("prompt_tokens", 0),
+                    "output_tokens": usage.get("completion_tokens", 0),
+                }
+                return data["choices"][0]["message"]["content"], stats
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = LLMError(f"OpenAI-compat network error: {exc}")
                 logger.warning("OpenAI-compat network error, retry %d/%d: %s", i, len(_BACKOFF), exc)
@@ -195,11 +240,10 @@ async def call_llm(
     temperature: float,
     max_tokens: int,
     history: Optional[list[dict]] = None,
-) -> str:
+) -> tuple[str, dict]:
     """
     Route an LLM call to the correct provider.
-
-    Supported providers: anthropic | ollama | lmstudio | openai | openai_compat
+    Returns (text, stats) where stats = {input_tokens, output_tokens}.
     Raises LLMError on final failure.
     """
     logger.info("call_llm provider=%s model=%s", provider, model)

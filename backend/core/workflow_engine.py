@@ -189,8 +189,13 @@ class WorkflowEngine:
             prompt = self._build_fix_prompt(task, prior_review)
             self._record("pm", "PM → Worker (Qwen) [fix request]", prompt, task.id, iteration_num, "prompt")
 
+        await self._emit(EventType.LLM_CALL_STARTED, task.id,
+            f"Calling {provider}/{model}…",
+            {"provider": provider, "model": model, "agent": "worker"})
+
+        t0 = time.time()
         try:
-            output = await call_llm(
+            output, stats = await call_llm(
                 prompt=prompt,
                 system=agent_cfg.get("system_prompt", ""),
                 model=model,
@@ -201,10 +206,22 @@ class WorkflowEngine:
                 max_tokens=agent_cfg.get("max_tokens", 8192),
             )
         except LLMError as exc:
+            duration_ms = round((time.time() - t0) * 1000)
+            self._record("worker", f"Worker Error ({provider}/{model})", str(exc),
+                         task.id, iteration_num, "error", duration_ms=duration_ms)
+            await self._emit(EventType.LLM_CALL_FAILED, task.id,
+                f"Worker call failed after {duration_ms}ms: {exc}",
+                {"provider": provider, "model": model, "error": str(exc), "duration_ms": duration_ms})
             raise RuntimeError(f"Worker LLM failed: {exc}") from exc
 
-        await self._emit(EventType.WORKER_OUTPUT_RECEIVED, task.id, f"Worker response received ({len(output)} chars)")
-        self._record("worker", "Worker (Qwen)", output, task.id, iteration_num, "response")
+        duration_ms = round((time.time() - t0) * 1000)
+        await self._emit(EventType.LLM_CALL_COMPLETED, task.id,
+            f"Worker responded in {duration_ms}ms — {stats.get('output_tokens', 0)} tokens",
+            {"provider": provider, "model": model, "duration_ms": duration_ms, **stats})
+        await self._emit(EventType.WORKER_OUTPUT_RECEIVED, task.id,
+            f"Worker response received ({len(output)} chars, {duration_ms}ms)")
+        self._record("worker", "Worker (Qwen)", output, task.id, iteration_num, "response",
+                     duration_ms=duration_ms, tokens=stats)
         return output
 
     async def _call_reviewer(self, task: Task, worker_output: str, iteration: int) -> ReviewResult:
@@ -237,8 +254,13 @@ class WorkflowEngine:
             task.id, iteration, "prompt",
         )
 
+        await self._emit(EventType.LLM_CALL_STARTED, task.id,
+            f"Calling {provider}/{model} for review…",
+            {"provider": provider, "model": model, "agent": "reviewer"})
+
+        t0 = time.time()
         try:
-            raw = await call_llm(
+            raw, stats = await call_llm(
                 prompt=prompt,
                 system=agent_cfg.get("system_prompt", ""),
                 model=model,
@@ -249,7 +271,12 @@ class WorkflowEngine:
                 max_tokens=agent_cfg.get("max_tokens", 4096),
             )
         except ClaudeRateLimitError:
-            self._record("reviewer", "Reviewer (Claude)", "[RATE LIMITED] Review skipped — Claude API quota exhausted. Task auto-approved pending manual review.", task.id, iteration, "response")
+            duration_ms = round((time.time() - t0) * 1000)
+            self._record("reviewer", "Reviewer (Claude)", "[RATE LIMITED] Review skipped — Claude API quota exhausted. Task auto-approved pending manual review.",
+                         task.id, iteration, "error", duration_ms=duration_ms)
+            await self._emit(EventType.LLM_CALL_FAILED, task.id,
+                "Claude rate-limited — task auto-approved",
+                {"provider": provider, "model": model, "error": "rate_limited", "duration_ms": duration_ms})
             return ReviewResult(
                 approved=True,
                 summary="__rate_limited__",
@@ -258,7 +285,18 @@ class WorkflowEngine:
                 iteration=iteration,
             )
         except LLMError as exc:
+            duration_ms = round((time.time() - t0) * 1000)
+            self._record("reviewer", f"Reviewer Error ({provider}/{model})", str(exc),
+                         task.id, iteration, "error", duration_ms=duration_ms)
+            await self._emit(EventType.LLM_CALL_FAILED, task.id,
+                f"Reviewer call failed after {duration_ms}ms: {exc}",
+                {"provider": provider, "model": model, "error": str(exc), "duration_ms": duration_ms})
             raise RuntimeError(f"Reviewer LLM failed: {exc}") from exc
+
+        duration_ms = round((time.time() - t0) * 1000)
+        await self._emit(EventType.LLM_CALL_COMPLETED, task.id,
+            f"Reviewer responded in {duration_ms}ms — {stats.get('output_tokens', 0)} tokens",
+            {"provider": provider, "model": model, "duration_ms": duration_ms, **stats})
 
         review = self._parse_review(raw, iteration)
         verdict = "APPROVED ✓" if review.approved else "CHANGES REQUIRED ✗"
@@ -269,7 +307,8 @@ class WorkflowEngine:
             )
         if review.feedback:
             review_content += f"\n\n**Notes:**\n{review.feedback}"
-        self._record("reviewer", "Reviewer (Claude)", review_content, task.id, iteration, "response")
+        self._record("reviewer", "Reviewer (Claude)", review_content, task.id, iteration, "response",
+                     duration_ms=duration_ms, tokens=stats)
         return review
 
     # ── Prompt builders ───────────────────────────────────────────────────────
@@ -341,8 +380,10 @@ class WorkflowEngine:
         task_id: str,
         iteration: int = 0,
         entry_type: str = "response",
+        duration_ms: int = 0,
+        tokens: Optional[dict] = None,
     ) -> None:
-        self._log.append({
+        entry = {
             "agent": agent,
             "label": label,
             "content": content,
@@ -350,10 +391,23 @@ class WorkflowEngine:
             "iteration": iteration,
             "type": entry_type,
             "timestamp": time.time(),
-        })
-        # Cap at 500 entries to prevent unbounded memory growth
+            "duration_ms": duration_ms,
+            "tokens": tokens or {},
+        }
+        self._log.append(entry)
         if len(self._log) > 500:
             self._log.pop(0)
+        # Push live to SSE clients so the Models Talking panel updates immediately
+        try:
+            event = PipelineEvent(
+                type=EventType.CONVERSATION_ENTRY,
+                task_id=task_id,
+                message=label,
+                data={"entry": entry},
+            )
+            self._queue.put_nowait(event)
+        except Exception:
+            pass
 
     # ── Event helpers ─────────────────────────────────────────────────────────
 

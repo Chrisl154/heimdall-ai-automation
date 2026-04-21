@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -17,9 +18,21 @@ load_dotenv()
 # Ensure the backend directory is on sys.path so `core.*` imports work
 sys.path.insert(0, str(Path(__file__).parent))
 
+_log_dir = Path("logs")
+_log_dir.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            _log_dir / "heimdall.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        ),
+    ],
 )
 logger = logging.getLogger("heimdall")
 
@@ -103,6 +116,7 @@ from core.routes.models import router as models_router     # noqa: E402
 from core.routes.project import router as project_router     # noqa: E402
 from core.routes.github import router as github_router       # noqa: E402
 from core.routes.system import router as system_router       # noqa: E402
+from core.routes.logs import router as logs_router           # noqa: E402
 
 app.include_router(pm.router, dependencies=[Depends(require_token)])
 app.include_router(tasks.router, dependencies=[Depends(require_token)])
@@ -121,6 +135,7 @@ app.include_router(models_router, dependencies=[Depends(require_token)])
 app.include_router(project_router, dependencies=[Depends(require_token)])
 app.include_router(github_router, dependencies=[Depends(require_token)])
 app.include_router(system_router, dependencies=[Depends(require_token)])
+app.include_router(logs_router, dependencies=[Depends(require_token)])
 app.include_router(setup_router)
 
 

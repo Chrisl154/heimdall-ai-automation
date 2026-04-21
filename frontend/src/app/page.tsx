@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { api, ConversationEntry, ModelsResponse, PipelineEvent, subscribeToEvents } from "@/lib/api";
+import { api, ClaudeUsage, ConversationEntry, ModelsResponse, PipelineEvent, subscribeToEvents } from "@/lib/api";
 import { PMStatusBar } from "@/components/PMStatusBar";
 import { Send, Bot, User, Zap, ChevronDown, MessagesSquare, X, ChevronRight, RefreshCw } from "lucide-react";
 
@@ -8,6 +8,14 @@ interface Message { role: "user" | "assistant" | "event"; content: string; time:
 interface SelectedModel { provider: string; model: string; label: string; }
 
 function now() { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+
+function formatClaudeReset(resetStr?: string): string {
+  if (!resetStr) return "";
+  const diffMs = new Date(resetStr).getTime() - Date.now();
+  if (diffMs <= 0) return "resetting…";
+  const mins = Math.ceil(diffMs / 60000);
+  return `~${mins}m`;
+}
 
 // ── Agent conversation panel ──────────────────────────────────────────────────
 
@@ -39,6 +47,12 @@ function AgentBubble({ entry, expanded, onToggle }: {
         <span className="text-[10px] text-muted-foreground font-mono">
           {new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
         </span>
+        {entry.duration_ms != null && entry.duration_ms > 0 && (
+          <span className="text-[10px] text-muted-foreground">· {(entry.duration_ms / 1000).toFixed(1)}s</span>
+        )}
+        {entry.tokens?.output_tokens != null && entry.tokens.output_tokens > 0 && (
+          <span className="text-[10px] text-muted-foreground">· {entry.tokens.output_tokens.toLocaleString()} tok</span>
+        )}
       </div>
 
       {/* Content */}
@@ -65,6 +79,71 @@ function AgentBubble({ entry, expanded, onToggle }: {
   );
 }
 
+const PANEL_ONLY = new Set(["conversation_entry", "llm_call_started", "llm_call_completed", "llm_call_failed", "pm_chat_response", "commit_approval_requested"]);
+
+interface ApprovalInfo { title: string; audit?: string; output_preview?: string; }
+
+function ApprovalCard({ taskId, info, onApprove, onDecline }: {
+  taskId: string;
+  info: ApprovalInfo;
+  onApprove: (id: string) => Promise<void>;
+  onDecline: (id: string) => Promise<void>;
+}) {
+  const [working, setWorking] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
+
+  const approve = async () => {
+    setWorking(true);
+    await onApprove(taskId);
+    setWorking(false);
+  };
+  const decline = async () => {
+    setWorking(true);
+    await onDecline(taskId);
+    setWorking(false);
+  };
+
+  return (
+    <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-3 space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0" />
+          <span className="text-xs font-medium text-yellow-300 truncate">Ready to commit: {info.title}</span>
+        </div>
+        {info.audit && (
+          <button
+            onClick={() => setShowAudit(p => !p)}
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            {showAudit ? "Hide audit ▲" : "View re-audit ▼"}
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <button
+            onClick={decline}
+            disabled={working}
+            className="text-xs px-3 py-1 border border-yellow-400/30 text-yellow-400 rounded-lg hover:bg-yellow-400/10 disabled:opacity-40 transition-colors"
+          >
+            {working ? "Working…" : "Decline & Re-audit"}
+          </button>
+          <button
+            onClick={approve}
+            disabled={working}
+            className="text-xs px-3 py-1 bg-green-400/20 text-green-400 border border-green-400/30 rounded-lg hover:bg-green-400/30 disabled:opacity-40 transition-colors font-medium"
+          >
+            Approve & Commit
+          </button>
+        </div>
+      </div>
+      {showAudit && info.audit && (
+        <pre className="text-[10px] text-muted-foreground font-mono bg-background/60 border border-border rounded-lg p-2 whitespace-pre-wrap max-h-48 overflow-y-auto">
+          {info.audit}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
@@ -76,10 +155,14 @@ export default function ChatPage() {
   const [modelsData, setModelsData]   = useState<ModelsResponse | null>(null);
   const [selected, setSelected]       = useState<SelectedModel | null>(null);
   const [selectorOpen, setSelectorOpen] = useState(false);
-  const [showPanel, setShowPanel]     = useState(false);
+  const [showPanel, setShowPanel]     = useState(true);
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [convLoading, setConvLoading] = useState(false);
   const [expanded, setExpanded]       = useState<Record<number, boolean>>({});
+  const [claudeUsage, setClaudeUsage] = useState<ClaudeUsage | null>(null);
+  const [pendingCall, setPendingCall] = useState<{ provider: string; model: string; agent: string } | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<Record<string, ApprovalInfo>>({});
+  const [sessionStats, setSessionStats] = useState<Record<string, { calls: number; input_tokens: number; output_tokens: number; total_ms: number }>>({});
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const convBottomRef = useRef<HTMLDivElement>(null);
@@ -119,6 +202,12 @@ export default function ChatPage() {
     if (showPanel) loadConversation();
   }, [showPanel, loadConversation]);
 
+  const refreshClaudeUsage = useCallback(() => {
+    api.pm.claudeUsage().then(setClaudeUsage).catch(() => {});
+  }, []);
+
+  useEffect(() => { refreshClaudeUsage(); }, [refreshClaudeUsage]);
+
   // Close model selector on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -132,17 +221,46 @@ export default function ChatPage() {
   // SSE events — chat feed + live conversation updates
   useEffect(() => {
     const unsub = subscribeToEvents((ev: PipelineEvent) => {
-      if (ev.message) {
+      // Main chat feed — skip panel-only events
+      if (ev.message && !PANEL_ONLY.has(ev.type)) {
         setMessages(prev => [...prev, { role: "event", content: ev.message, time: now() }]);
       }
-      // Reload conversation log when workflow events arrive
-      const workflowTypes = ["worker_output_received", "review_approved", "review_rejected", "task_completed", "task_escalated"];
-      if (workflowTypes.includes(ev.type) && showPanel) {
-        loadConversation();
+      // Live conversation panel — push entries directly
+      if (ev.type === "conversation_entry" && ev.data?.entry) {
+        setConversation(prev => [...prev, ev.data.entry as ConversationEntry]);
+      }
+      // Track pending LLM call for spinner
+      if (ev.type === "llm_call_started") {
+        setPendingCall(ev.data as { provider: string; model: string; agent: string });
+      }
+      if (ev.type === "llm_call_completed" || ev.type === "llm_call_failed") {
+        setPendingCall(null);
+        refreshClaudeUsage();
+        // Accumulate per-provider session stats
+        if (ev.type === "llm_call_completed") {
+          const key = `${ev.data.provider}/${ev.data.model}`;
+          setSessionStats(prev => ({
+            ...prev,
+            [key]: {
+              calls: (prev[key]?.calls ?? 0) + 1,
+              input_tokens: (prev[key]?.input_tokens ?? 0) + Number(ev.data.input_tokens ?? 0),
+              output_tokens: (prev[key]?.output_tokens ?? 0) + Number(ev.data.output_tokens ?? 0),
+              total_ms: (prev[key]?.total_ms ?? 0) + Number(ev.data.duration_ms ?? 0),
+            },
+          }));
+        }
+      }
+      // Commit approval gate
+      if (ev.type === "commit_approval_requested" && ev.task_id) {
+        const d = ev.data as unknown as ApprovalInfo;
+        setPendingApprovals(prev => ({ ...prev, [ev.task_id!]: d }));
+      }
+      if (ev.type === "commit_approved" && ev.task_id) {
+        setPendingApprovals(prev => { const n = { ...prev }; delete n[ev.task_id!]; return n; });
       }
     });
     return unsub;
-  }, [showPanel, loadConversation]);
+  }, [refreshClaudeUsage]);
 
   const send = async () => {
     const text = input.trim();
@@ -169,6 +287,15 @@ export default function ChatPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApprove = async (taskId: string) => {
+    await api.pm.approveCommit(taskId).catch(() => {});
+  };
+
+  const handleDecline = async (taskId: string) => {
+    await api.pm.declineCommit(taskId).catch(() => {});
+    // pendingApprovals will update via SSE commit_approval_requested with audit
   };
 
   const pmOption: SelectedModel = { provider: "pm", model: "orchestrator", label: "PM (Gemma)" };
@@ -214,7 +341,15 @@ export default function ChatPage() {
           )}
         </div>
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {claudeUsage?.["tokens-remaining"] && (
+            <div className="flex items-center gap-1 px-2 py-1 text-[10px] bg-orange-400/10 border border-orange-400/20 rounded text-orange-300 font-mono">
+              <span>Claude {Number(claudeUsage["tokens-remaining"]).toLocaleString()}/{Number(claudeUsage["tokens-limit"]).toLocaleString()} tok</span>
+              {claudeUsage["tokens-reset"] && (
+                <span className="text-orange-300/60">· {formatClaudeReset(claudeUsage["tokens-reset"])}</span>
+              )}
+            </div>
+          )}
           <button
             onClick={() => setShowPanel(p => !p)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded-lg transition-colors
@@ -227,6 +362,21 @@ export default function ChatPage() {
           </button>
         </div>
       </div>
+
+      {/* Pending commit approvals */}
+      {Object.keys(pendingApprovals).length > 0 && (
+        <div className="border-b border-border px-4 py-2 space-y-2 bg-yellow-400/5">
+          {Object.entries(pendingApprovals).map(([taskId, info]) => (
+            <ApprovalCard
+              key={taskId}
+              taskId={taskId}
+              info={info}
+              onApprove={handleApprove}
+              onDecline={handleDecline}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Main content — chat + optional conversation panel */}
       <div className="flex flex-1 min-h-0">
@@ -329,6 +479,22 @@ export default function ChatPage() {
               })}
             </div>
 
+            {/* Session stats */}
+            {Object.keys(sessionStats).length > 0 && (
+              <div className="px-4 py-2 border-b border-border bg-card/20 space-y-1">
+                {Object.entries(sessionStats).map(([key, s]) => (
+                  <div key={key} className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                    <span className="text-foreground/50 truncate max-w-[160px]">{key}</span>
+                    <span className="shrink-0">{s.calls} call{s.calls !== 1 ? "s" : ""}</span>
+                    <span>·</span>
+                    <span className="shrink-0">{((s.input_tokens + s.output_tokens) / 1000).toFixed(1)}k tok</span>
+                    <span>·</span>
+                    <span className="shrink-0">avg {s.calls > 0 ? (s.total_ms / s.calls / 1000).toFixed(1) : "0"}s</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {convLoading && conversation.length === 0 && (
@@ -351,6 +517,14 @@ export default function ChatPage() {
                   onToggle={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
                 />
               ))}
+              {pendingCall && (
+                <div className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-3 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
+                  <span className="text-xs text-blue-400 animate-pulse">
+                    {pendingCall.agent === "reviewer" ? "Reviewer (Claude)" : "Worker"} calling {pendingCall.provider}/{pendingCall.model}…
+                  </span>
+                </div>
+              )}
               <div ref={convBottomRef} />
             </div>
           </div>

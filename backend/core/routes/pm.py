@@ -85,7 +85,7 @@ async def direct_chat(body: DirectChatRequest):
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
     try:
-        reply = await call_llm(
+        reply, _ = await call_llm(
             prompt=body.message,
             system="You are a helpful AI assistant.",
             model=body.model,
@@ -99,6 +99,34 @@ async def direct_chat(body: DirectChatRequest):
         raise HTTPException(status_code=502, detail=str(exc))
 
     return {"reply": reply, "provider": body.provider, "model": body.model, "session_id": body.session_id}
+
+
+@router.post("/tasks/{task_id}/approve-commit")
+async def approve_commit(task_id: str):
+    result = await get_pm().approve_commit(task_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/tasks/{task_id}/decline-commit")
+async def decline_commit(task_id: str):
+    result = await get_pm().decline_commit(task_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/pending-approvals")
+def get_pending_approvals():
+    return {"approvals": get_pm().get_pending_approvals()}
+
+
+@router.get("/claude-usage")
+def get_claude_usage():
+    """Return the most recent Claude API rate-limit info captured from response headers."""
+    from core.llm_providers import get_claude_rate_info
+    return get_claude_rate_info()
 
 
 @router.get("/chat/history")

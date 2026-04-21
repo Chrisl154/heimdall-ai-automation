@@ -41,6 +41,14 @@ export const api = {
       request<{ entries: ConversationEntry[] }>(`/api/pm/conversation?limit=${limit}`),
     chatHistory: () =>
       request<{ messages: { role: string; content: string }[] }>("/api/pm/chat/history"),
+    claudeUsage: () =>
+      request<ClaudeUsage>("/api/pm/claude-usage"),
+    pendingApprovals: () =>
+      request<{ approvals: { task_id: string; title: string }[] }>("/api/pm/pending-approvals"),
+    approveCommit: (task_id: string) =>
+      request<{ status: string; task_id: string }>(`/api/pm/tasks/${task_id}/approve-commit`, { method: "POST" }),
+    declineCommit: (task_id: string) =>
+      request<{ status: string; task_id: string; audit: string }>(`/api/pm/tasks/${task_id}/decline-commit`, { method: "POST" }),
   },
 
   tasks: {
@@ -170,6 +178,13 @@ export const api = {
     setActive: (path: string) =>
       request<{ active_project_path: string }>("/api/github/set-active", { method: "POST", body: JSON.stringify({ path }) }),
     active: () => request<{ active_project_path: string | null }>("/api/github/active"),
+  },
+
+  logs: {
+    events: (limit = 500) =>
+      request<{ events: PipelineEvent[]; total: number }>(`/api/logs/events?limit=${limit}`),
+    app: (lines = 300) =>
+      request<{ lines: string[]; exists: boolean; total: number }>(`/api/logs/app?lines=${lines}`),
   },
 
   setup: {
@@ -392,8 +407,19 @@ export interface ConversationEntry {
   content: string;
   task_id: string;
   iteration: number;
-  type: "prompt" | "response";
+  type: "prompt" | "response" | "error";
   timestamp: number;
+  duration_ms?: number;
+  tokens?: { input_tokens: number; output_tokens: number };
+}
+
+export interface ClaudeUsage {
+  "tokens-limit"?: string;
+  "tokens-remaining"?: string;
+  "tokens-reset"?: string;
+  "requests-limit"?: string;
+  "requests-remaining"?: string;
+  "requests-reset"?: string;
 }
 
 export interface SystemInfo {

@@ -90,6 +90,13 @@ class EventType(str, Enum):
     TASK_FAILED = "task_failed"
     PM_CHAT_RESPONSE = "pm_chat_response"
     ERROR = "error"
+    LLM_CALL_STARTED = "llm_call_started"
+    LLM_CALL_COMPLETED = "llm_call_completed"
+    LLM_CALL_FAILED = "llm_call_failed"
+    CONVERSATION_ENTRY = "conversation_entry"
+    COMMIT_APPROVAL_REQUESTED = "commit_approval_requested"
+    COMMIT_APPROVED = "commit_approved"
+    COMMIT_DECLINED = "commit_declined"
 
 
 class PipelineEvent(BaseModel):
