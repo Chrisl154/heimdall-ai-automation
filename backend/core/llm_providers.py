@@ -118,6 +118,12 @@ async def _call_anthropic(
                     )
                     logger.warning("Anthropic %s, retry %d/%d", resp.status_code, i, len(_BACKOFF))
                     continue
+                if resp.status_code >= 400:
+                    # 4xx (except 429) — don't retry, include full body for diagnosis
+                    all_rate_limited = False
+                    body = resp.text[:800]
+                    logger.error("Anthropic %s (no retry): %s", resp.status_code, body)
+                    raise LLMError(f"Anthropic {resp.status_code}: {body}")
                 resp.raise_for_status()
                 data = resp.json()
                 usage = data.get("usage", {})
@@ -166,10 +172,14 @@ async def _call_ollama(
                 await asyncio.sleep(delay)
             try:
                 resp = await client.post(url, json=payload)
-                if resp.status_code in (429,) or resp.status_code >= 500:
+                if resp.status_code == 429 or resp.status_code >= 500:
                     last_exc = LLMError(f"Ollama {resp.status_code}: {resp.text[:200]}")
                     logger.warning("Ollama %s, retry %d/%d", resp.status_code, i, len(_BACKOFF))
                     continue
+                if resp.status_code >= 400:
+                    body = resp.text[:800]
+                    logger.error("Ollama %s (no retry): %s", resp.status_code, body)
+                    raise LLMError(f"Ollama {resp.status_code}: {body}")
                 resp.raise_for_status()
                 data = resp.json()
                 stats = {
@@ -212,10 +222,14 @@ async def _call_openai_compat(
                 await asyncio.sleep(delay)
             try:
                 resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code in (429,) or resp.status_code >= 500:
+                if resp.status_code == 429 or resp.status_code >= 500:
                     last_exc = LLMError(f"OpenAI-compat {resp.status_code}: {resp.text[:200]}")
                     logger.warning("OpenAI-compat %s, retry %d/%d", resp.status_code, i, len(_BACKOFF))
                     continue
+                if resp.status_code >= 400:
+                    body = resp.text[:800]
+                    logger.error("OpenAI-compat %s (no retry): %s", resp.status_code, body)
+                    raise LLMError(f"OpenAI-compat {resp.status_code}: {body}")
                 resp.raise_for_status()
                 data = resp.json()
                 usage = data.get("usage", {})
