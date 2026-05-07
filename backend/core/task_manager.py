@@ -135,3 +135,14 @@ class TaskManager:
 def _now() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+_task_manager: Optional[TaskManager] = None
+
+
+def get_task_manager() -> TaskManager:
+    global _task_manager
+    if _task_manager is None:
+        import os
+        _task_manager = TaskManager(tasks_dir=os.getenv("HEIMDALL_TASKS_DIR", "tasks"))
+    return _task_manager

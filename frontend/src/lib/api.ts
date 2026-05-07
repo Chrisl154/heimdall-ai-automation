@@ -132,6 +132,11 @@ export const api = {
 
   analytics: () => request<AnalyticsData>("/api/analytics"),
 
+  templates: {
+    list: () => request<TemplateEntry[]>("/api/templates"),
+    get: (id: string) => request<TemplateEntry>(`/api/templates/${id}`),
+  },
+
   models: {
     scan: () => request<ModelsResponse>("/api/models"),
     probe: (provider: string, url: string) =>
@@ -469,6 +474,15 @@ export interface ProjectSummary {
     active: { id: string; title: string; priority: string; status: string; tags: string[] }[];
     next_up: { id: string; title: string; priority: string; status: string; tags: string[] }[];
   };
+}
+
+export interface TemplateEntry {
+  id: string;
+  label: string;
+  priority: string;
+  tags: string[];
+  max_review_iterations: number;
+  description_template: string;
 }
 
 export interface AnalyticsData {

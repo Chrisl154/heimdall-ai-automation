@@ -14,18 +14,13 @@ from core.models import (
     TaskStatus,
     TaskUpdateRequest,
 )
-from core.task_manager import TaskManager
+from core.task_manager import get_task_manager
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-_mgr: TaskManager | None = None
 
-
-def _get_mgr() -> TaskManager:
-    global _mgr
-    if _mgr is None:
-        _mgr = TaskManager()
-    return _mgr
+def _get_mgr():
+    return get_task_manager()
 
 
 @router.get("", response_model=list[Task])

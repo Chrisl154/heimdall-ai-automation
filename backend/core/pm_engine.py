@@ -10,11 +10,14 @@ Responsibilities:
 """
 import asyncio
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Optional
 
 from core import config
+
+logger = logging.getLogger(__name__)
 
 _CHAT_LOG_PATH = Path("logs/chat_history.json")
 _EVENT_LOG_PATH = Path("logs/events.jsonl")
@@ -485,8 +488,8 @@ class PMEngine:
 
     def _get_task_mgr(self):
         if self._task_mgr is None:
-            from core.task_manager import TaskManager
-            self._task_mgr = TaskManager()
+            from core.task_manager import get_task_manager
+            self._task_mgr = get_task_manager()
         return self._task_mgr
 
     # ── Chat history persistence ───────────────────────────────────────────────

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
-import { api, Task, TaskStatus, subscribeToEvents, CreateTaskBody } from "@/lib/api";
+import { api, Task, TaskStatus, subscribeToEvents, CreateTaskBody, TemplateEntry } from "@/lib/api";
 import { PMStatusBar } from "@/components/PMStatusBar";
 import { Plus, X, AlertTriangle, CheckCircle2, Loader2, Clock, Eye, RefreshCw } from "lucide-react";
 
@@ -40,7 +40,7 @@ export default function KanbanPage() {
   const [form, setForm] = useState<NewTaskForm>({ title: "", description: "", priority: "medium" });
   const [saving, setSaving] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [templateList, setTemplateList] = useState<Array<{ id: string; label: string; priority: string; tags: string[]; description_template: string }>>([]);
+  const [templateList, setTemplateList] = useState<TemplateEntry[]>([]);
 
   const refresh = useCallback(() => { api.tasks.list().then(setTasks).catch(() => {}); }, []);
 
@@ -52,7 +52,7 @@ export default function KanbanPage() {
 
   useEffect(() => {
     if (showAdd) {
-      fetch("/api/templates").then(r => r.json()).then(setTemplateList).catch(() => {});
+      api.templates.list().then(setTemplateList).catch(() => {});
     }
   }, [showAdd]);
 
