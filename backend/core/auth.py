@@ -4,6 +4,7 @@ Token authentication dependency for FastAPI.
 Set HEIMDALL_API_TOKEN in .env to enable auth.
 If the variable is empty or unset, all requests are allowed (dev mode).
 """
+import hmac
 import os
 from fastapi import HTTPException, Request, status
 
@@ -15,5 +16,5 @@ def require_token(request: Request) -> None:
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
-    if auth_header[7:] != token:
+    if not hmac.compare_digest(auth_header[7:], token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

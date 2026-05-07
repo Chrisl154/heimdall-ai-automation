@@ -80,6 +80,9 @@ def test_client(monkeypatch, tmp_path):
     monkeypatch.setenv("HEIMDALL_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("HEIMDALL_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("HEIMDALL_TASKS_DIR", str(tmp_path / "tasks"))
+    # Explicitly disable auth for the base test_client so existing tests
+    # don't break when HEIMDALL_API_TOKEN is set in the shell environment.
+    monkeypatch.setenv("HEIMDALL_API_TOKEN", "")
 
     tasks_dir = tmp_path / "tasks"
     tasks_dir.mkdir(parents=True, exist_ok=True)
@@ -104,8 +107,10 @@ def test_client(monkeypatch, tmp_path):
     # Reset module-level singletons so each test gets a clean state
     import core.vault as vault_mod
     import core.pm_engine as pm_mod
+    import core.task_manager as tm_mod
     vault_mod._vault = None
     pm_mod._pm = None
+    tm_mod._task_manager = None
 
     with (
         patch("core.messaging.manager.MessagingManager.start_all", new=AsyncMock()),

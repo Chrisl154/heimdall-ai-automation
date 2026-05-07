@@ -9,6 +9,7 @@ All calls return (text, stats_dict) where stats_dict has input_tokens, output_to
 import asyncio
 import json
 import logging
+import re
 from typing import AsyncGenerator, Optional
 
 import httpx
@@ -429,9 +430,24 @@ async def _stream_ollama(
                     data = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                content = data.get("message", {}).get("content", "")
-                if content:
-                    yield ("text", content)
+                msg = data.get("message", {})
+
+                # Dedicated thinking field — Qwen3, DeepSeek-R1 on newer Ollama
+                thinking_chunk = msg.get("thinking", "")
+                if thinking_chunk:
+                    yield ("thinking", thinking_chunk)
+
+                # Content may embed <think>…</think> tags (some models / older Ollama)
+                raw_content = msg.get("content", "")
+                if raw_content:
+                    think_blocks = re.findall(r"<think>(.*?)</think>", raw_content, re.DOTALL)
+                    for block in think_blocks:
+                        if block.strip():
+                            yield ("thinking", block)
+                    text_only = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL)
+                    if text_only:
+                        yield ("text", text_only)
+
                 if data.get("done"):
                     input_tokens = data.get("prompt_eval_count", 0)
                     output_tokens = data.get("eval_count", 0)

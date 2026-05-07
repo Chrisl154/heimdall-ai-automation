@@ -72,10 +72,11 @@ async def lifespan(app: FastAPI):
     await pm.start()
     logger.info("PM engine auto-started.")
 
-    # Start scheduler
+    # Start scheduler — share the singleton TaskManager so scheduled tasks
+    # are visible to the same in-memory dict that the PM and API routes use.
     from scheduler import TaskScheduler, set_scheduler
-    from core.task_manager import TaskManager
-    scheduler = TaskScheduler(TaskManager())
+    from core.task_manager import get_task_manager
+    scheduler = TaskScheduler(get_task_manager())
     set_scheduler(scheduler)
     scheduler.start()
     logger.info("Scheduler started.")
@@ -129,7 +130,7 @@ app.include_router(workspace.router, dependencies=[Depends(require_token)])
 app.include_router(webhooks.router, dependencies=[Depends(require_token)])
 app.include_router(analytics.router, dependencies=[Depends(require_token)])
 app.include_router(templates.router, dependencies=[Depends(require_token)])
-app.include_router(schedule_router)
+app.include_router(schedule_router, dependencies=[Depends(require_token)])
 app.include_router(config_router, dependencies=[Depends(require_token)])
 app.include_router(models_router, dependencies=[Depends(require_token)])
 app.include_router(project_router, dependencies=[Depends(require_token)])
