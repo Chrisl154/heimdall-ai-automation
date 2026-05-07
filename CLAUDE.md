@@ -128,3 +128,19 @@ Both `PMEngine` and `Vault` use module-level singletons (`get_pm()`, `get_vault(
 ### Claude rate limiting
 
 `WorkflowEngine._call_reviewer()` detects Anthropic 429 responses. After all retries are exhausted, it raises `ClaudeRateLimitError` and auto-approves the task with `summary="__rate_limited__"`. PMEngine then pauses Claude for 30 minutes (`_claude_unavailable_until`). Check for this sentinel value before interpreting review results.
+
+### Auth pattern
+
+`core/auth.py` exposes `require_token` — a FastAPI dependency that validates the `Authorization: Bearer <token>` header against `HEIMDALL_API_TOKEN`. When the env var is empty or unset, auth is disabled (dev mode). All routers in `main.py` are registered with `dependencies=[Depends(require_token)]` except `/api/setup/*`. Token comparison uses `hmac.compare_digest()` (timing-safe).
+
+### Webhook dispatcher
+
+`core/webhook_dispatcher.py` persists webhook configs in `data/webhooks.json`. On task completion `PMEngine` calls `WebhookDispatcher.dispatch(event, payload)` which fans out HTTP POST to all enabled URLs via `httpx.AsyncClient`. Secrets are stored masked (only a SHA-256 prefix is shown in list responses). CRUD endpoints: `GET/POST /api/webhooks`, `PATCH/DELETE /api/webhooks/{idx}`, `POST /api/webhooks/{idx}/test`.
+
+### Ollama thinking output
+
+`_stream_ollama()` in `core/llm_providers.py` yields both a `"thinking"` chunk type and a `"text"` chunk type. Newer Ollama models (Qwen3, DeepSeek-R1) expose reasoning in a dedicated `message.thinking` field; older builds embed it as `<think>…</think>` inline in `message.content`. Both forms are extracted and surfaced. Callers that only want the final answer should filter for `chunk_type == "text"`.
+
+### Messaging adapters
+
+`core/messaging/` contains provider adapters (Telegram, Discord, Email). `MessagingManager` (singleton) starts/stops all adapters during lifespan and exposes `send(channel, text)`. Adapter credentials live in the vault (`telegram_bot_token`, `discord_webhook_url`, etc.). Adapters are lazy-initialized — missing credentials silently disable that adapter without crashing startup.
