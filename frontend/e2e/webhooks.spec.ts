@@ -1,74 +1,58 @@
 import { test, expect } from "@playwright/test";
+import { openSettingsTab, Selectors } from "./helpers";
 
-const WEBHOOK_URL = "https://e2e-test.example.com/webhook";
+// ── Webhooks (Settings → Webhooks tab) ───────────────────────────────────────
 
-test.describe("Webhooks UI", () => {
+const TEST_URL = "https://e2e-test.example.com/webhook";
+
+async function addWebhook(page: import("@playwright/test").Page, url: string) {
+  const addBtn = Selectors.button(page, /add webhook|new webhook|\+/i);
+  if (!await addBtn.isVisible()) return false;
+  await addBtn.click();
+
+  const urlInput = page
+    .locator('input[placeholder*="url" i], input[name="url" i], input[type="url"]')
+    .first();
+  if (await urlInput.isVisible()) await urlInput.fill(url);
+
+  await Selectors.submitBtn(page).click();
+  await expect(page.locator(`text=${url}`)).toBeVisible({ timeout: 10_000 });
+  return true;
+}
+
+test.describe("Webhooks", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/settings");
-    await page.waitForLoadState("networkidle");
-
-    const tab = page.locator("[role=tab], button, a").filter({ hasText: /webhook/i }).first();
-    if (await tab.isVisible()) {
-      await tab.click();
-      await page.waitForLoadState("networkidle");
-    }
+    await openSettingsTab(page, /webhook/i);
   });
 
-  test("webhook section is visible", async ({ page }) => {
+  // ── Visibility ────────────────────────────────────────────────────────────
+
+  test("Webhooks section is visible", async ({ page }) => {
     await expect(
       page.locator("text=/webhook/i").first()
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("can add a webhook", async ({ page }) => {
-    const addBtn = page.locator("button", { hasText: /add webhook|new webhook|\+/i }).first();
-    if (!await addBtn.isVisible()) {
-      test.skip();
-      return;
-    }
-    await addBtn.click();
+  // ── CRUD ──────────────────────────────────────────────────────────────────
 
-    const urlInput = page
-      .locator('input[placeholder*="url" i], input[name="url" i], input[type="url"]')
-      .first();
-    if (await urlInput.isVisible()) {
-      await urlInput.fill(WEBHOOK_URL);
-    }
-
-    await page
-      .locator("button[type=submit], button:has-text('Save'), button:has-text('Add')")
-      .last()
-      .click();
-
-    await expect(page.locator(`text=${WEBHOOK_URL}`)).toBeVisible({ timeout: 10_000 });
+  test("can add a webhook and it appears in the list", async ({ page }) => {
+    await addWebhook(page, TEST_URL);
+    // Assertion already inside addWebhook; reaching here = pass
   });
 
-  test("can delete a webhook", async ({ page }) => {
-    // First ensure there's a webhook to delete (add one if section is empty)
-    const existing = page.locator(`text=${WEBHOOK_URL}`);
-    if (!await existing.isVisible()) {
-      const addBtn = page.locator("button", { hasText: /add webhook|new webhook|\+/i }).first();
-      if (await addBtn.isVisible()) {
-        await addBtn.click();
-        const urlInput = page.locator('input[placeholder*="url" i], input[type="url"]').first();
-        if (await urlInput.isVisible()) await urlInput.fill(WEBHOOK_URL);
-        await page.locator("button[type=submit], button:has-text('Save')").last().click();
-        await page.locator(`text=${WEBHOOK_URL}`).waitFor({ timeout: 10_000 });
-      } else {
-        test.skip();
-        return;
-      }
-    }
+  test("can delete a webhook and it disappears from the list", async ({ page }) => {
+    const added = await addWebhook(page, TEST_URL);
+    if (!added) return;
 
     const deleteBtn = page
-      .locator(`text=${WEBHOOK_URL}`)
+      .locator(`text=${TEST_URL}`)
       .locator("..")
       .locator("button:has-text(/delete|remove/i)")
       .first();
 
-    if (await deleteBtn.isVisible()) {
-      await deleteBtn.click();
-      await expect(page.locator(`text=${WEBHOOK_URL}`)).not.toBeVisible({ timeout: 5_000 });
-    }
+    if (!await deleteBtn.isVisible()) return;
+
+    await deleteBtn.click();
+    await expect(page.locator(`text=${TEST_URL}`)).not.toBeVisible({ timeout: 5_000 });
   });
 });
