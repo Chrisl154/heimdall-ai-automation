@@ -410,12 +410,17 @@ export interface ConversationEntry {
   agent: "pm" | "worker" | "reviewer";
   label: string;
   content: string;
+  thinking?: string;
   task_id: string;
   iteration: number;
   type: "prompt" | "response" | "error";
   timestamp: number;
   duration_ms?: number;
   tokens?: { input_tokens: number; output_tokens: number };
+  /** True while the entry is still streaming in */
+  streaming?: boolean;
+  /** Shared ID linking delta events to this entry */
+  stream_id?: string;
 }
 
 export interface ClaudeUsage {

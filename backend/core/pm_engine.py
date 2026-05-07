@@ -347,7 +347,10 @@ class PMEngine:
             except asyncio.TimeoutError:
                 continue
 
-            self._write_event_log(event)
+            try:
+                self._write_event_log(event)
+            except Exception as exc:
+                logger.warning("Event log write failed: %s", exc)
 
             dead = []
             for q in self._subscribers:
@@ -363,19 +366,15 @@ class PMEngine:
 
     def _write_event_log(self, event: PipelineEvent) -> None:
         """Append event to logs/events.jsonl; rotate when too large."""
-        try:
-            _EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with _EVENT_LOG_PATH.open("a", encoding="utf-8") as f:
-                f.write(event.model_dump_json() + "\n")
-            # Cheap size-based rotation: trim to last _MAX_EVENT_LOG_LINES
-            if _EVENT_LOG_PATH.stat().st_size > 4 * 1024 * 1024:  # 4 MB
-                lines = _EVENT_LOG_PATH.read_text(encoding="utf-8").splitlines()
-                _EVENT_LOG_PATH.write_text(
-                    "\n".join(lines[-_MAX_EVENT_LOG_LINES:]) + "\n",
-                    encoding="utf-8",
-                )
-        except Exception as exc:
-            logger.warning("Event log write failed: %s", exc)
+        _EVENT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _EVENT_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(event.model_dump_json() + "\n")
+        if _EVENT_LOG_PATH.stat().st_size > 4 * 1024 * 1024:  # 4 MB
+            lines = _EVENT_LOG_PATH.read_text(encoding="utf-8").splitlines()
+            _EVENT_LOG_PATH.write_text(
+                "\n".join(lines[-_MAX_EVENT_LOG_LINES:]) + "\n",
+                encoding="utf-8",
+            )
 
     async def _emit(self, event_type: EventType, task_id: Optional[str], message: str, data: Optional[dict] = None) -> None:
         event = PipelineEvent(type=event_type, task_id=task_id, message=message, data=data or {})

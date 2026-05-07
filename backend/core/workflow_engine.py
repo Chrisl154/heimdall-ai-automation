@@ -16,6 +16,7 @@ import asyncio
 import json
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -169,7 +170,7 @@ class WorkflowEngine:
     # ── LLM calls ─────────────────────────────────────────────────────────────
 
     async def _call_worker(self, task: Task, prior_review: Optional[ReviewResult]) -> str:
-        from core.llm_providers import call_llm, LLMError
+        from core.llm_providers import stream_llm, LLMError
         from core.vault import get_vault
 
         agent_cfg = config.get("agents.worker", {})
@@ -179,23 +180,31 @@ class WorkflowEngine:
         model = agent_cfg.get("model", "qwen2.5-coder:7b")
         base_url = agent_cfg.get("base_url") or None
         api_key = vault.get(f"{provider}_key") or vault.get("openai_key")
-
         iteration_num = task.current_iteration
 
         if prior_review is None:
             prompt = self._build_initial_prompt(task)
-            self._record("pm", "PM → Worker (Qwen)", prompt, task.id, iteration_num, "prompt")
+            label = "PM → Worker (Qwen)"
         else:
             prompt = self._build_fix_prompt(task, prior_review)
-            self._record("pm", "PM → Worker (Qwen) [fix request]", prompt, task.id, iteration_num, "prompt")
+            label = "PM → Worker (Qwen) [fix request]"
+
+        self._record("pm", label, prompt, task.id, iteration_num, "prompt")
 
         await self._emit(EventType.LLM_CALL_STARTED, task.id,
             f"Calling {provider}/{model}…",
             {"provider": provider, "model": model, "agent": "worker"})
 
+        stream_id = uuid.uuid4().hex
         t0 = time.time()
+        text_chunks: list[str] = []
+        stats: dict = {}
+
+        # Push a placeholder streaming entry so the panel shows immediately
+        await self._emit_stream_start("worker", "Worker (Qwen)", stream_id, task.id, iteration_num)
+
         try:
-            output, stats = await call_llm(
+            async for chunk_type, chunk_text in stream_llm(
                 prompt=prompt,
                 system=agent_cfg.get("system_prompt", ""),
                 model=model,
@@ -204,7 +213,12 @@ class WorkflowEngine:
                 api_key=api_key,
                 temperature=agent_cfg.get("temperature", 0.3),
                 max_tokens=agent_cfg.get("max_tokens", 8192),
-            )
+            ):
+                if chunk_type == "__stats__":
+                    stats = json.loads(chunk_text)
+                elif chunk_type == "text":
+                    text_chunks.append(chunk_text)
+                    await self._emit_delta(stream_id, "text", chunk_text, task.id)
         except LLMError as exc:
             duration_ms = round((time.time() - t0) * 1000)
             self._record("worker", f"Worker Error ({provider}/{model})", str(exc),
@@ -214,14 +228,18 @@ class WorkflowEngine:
                 {"provider": provider, "model": model, "error": str(exc), "duration_ms": duration_ms})
             raise RuntimeError(f"Worker LLM failed: {exc}") from exc
 
+        output = "".join(text_chunks)
         duration_ms = round((time.time() - t0) * 1000)
+
         await self._emit(EventType.LLM_CALL_COMPLETED, task.id,
             f"Worker responded in {duration_ms}ms — {stats.get('output_tokens', 0)} tokens",
             {"provider": provider, "model": model, "duration_ms": duration_ms, **stats})
         await self._emit(EventType.WORKER_OUTPUT_RECEIVED, task.id,
             f"Worker response received ({len(output)} chars, {duration_ms}ms)")
-        self._record("worker", "Worker (Qwen)", output, task.id, iteration_num, "response",
-                     duration_ms=duration_ms, tokens=stats)
+
+        # Finalise the streaming entry with complete content + stats
+        self._record_stream_done("worker", "Worker (Qwen)", stream_id, output, "",
+                                 task.id, iteration_num, duration_ms, stats)
         return output
 
     async def _call_reviewer(self, task: Task, worker_output: str, iteration: int) -> ReviewResult:
@@ -236,7 +254,7 @@ class WorkflowEngine:
                 iteration=iteration,
             )
 
-        from core.llm_providers import call_llm, LLMError, ClaudeRateLimitError
+        from core.llm_providers import stream_llm, LLMError, ClaudeRateLimitError
         from core.vault import get_vault
 
         agent_cfg = config.get("agents.reviewer", {})
@@ -246,6 +264,7 @@ class WorkflowEngine:
         model = agent_cfg.get("model", "claude-sonnet-4-6")
         base_url = agent_cfg.get("base_url") or None
         api_key = vault.get("anthropic_key")
+        enable_thinking = bool(agent_cfg.get("enable_thinking", provider == "anthropic"))
 
         prompt = self._build_review_prompt(task, worker_output, iteration)
         self._record(
@@ -258,9 +277,16 @@ class WorkflowEngine:
             f"Calling {provider}/{model} for review…",
             {"provider": provider, "model": model, "agent": "reviewer"})
 
+        stream_id = uuid.uuid4().hex
         t0 = time.time()
+        text_chunks: list[str] = []
+        thinking_chunks: list[str] = []
+        stats: dict = {}
+
+        await self._emit_stream_start("reviewer", "Reviewer (Claude)", stream_id, task.id, iteration)
+
         try:
-            raw, stats = await call_llm(
+            async for chunk_type, chunk_text in stream_llm(
                 prompt=prompt,
                 system=agent_cfg.get("system_prompt", ""),
                 model=model,
@@ -269,18 +295,28 @@ class WorkflowEngine:
                 api_key=api_key,
                 temperature=agent_cfg.get("temperature", 0.1),
                 max_tokens=agent_cfg.get("max_tokens", 4096),
-            )
+                enable_thinking=enable_thinking,
+                thinking_budget=agent_cfg.get("thinking_budget", 8000),
+            ):
+                if chunk_type == "__stats__":
+                    stats = json.loads(chunk_text)
+                elif chunk_type == "thinking":
+                    thinking_chunks.append(chunk_text)
+                    await self._emit_delta(stream_id, "thinking", chunk_text, task.id)
+                elif chunk_type == "text":
+                    text_chunks.append(chunk_text)
+                    await self._emit_delta(stream_id, "text", chunk_text, task.id)
+
         except ClaudeRateLimitError:
             duration_ms = round((time.time() - t0) * 1000)
-            self._record("reviewer", "Reviewer (Claude)", "[RATE LIMITED] Review skipped — Claude API quota exhausted. Task auto-approved pending manual review.",
+            self._record("reviewer", "Reviewer (Claude)",
+                         "[RATE LIMITED] Review skipped — Claude API quota exhausted. Task auto-approved pending manual review.",
                          task.id, iteration, "error", duration_ms=duration_ms)
             await self._emit(EventType.LLM_CALL_FAILED, task.id,
                 "Claude rate-limited — task auto-approved",
                 {"provider": provider, "model": model, "error": "rate_limited", "duration_ms": duration_ms})
             return ReviewResult(
-                approved=True,
-                summary="__rate_limited__",
-                issues=[],
+                approved=True, summary="__rate_limited__", issues=[],
                 feedback="Claude API rate-limited. Qwen output was auto-approved. Manual review recommended.",
                 iteration=iteration,
             )
@@ -293,7 +329,10 @@ class WorkflowEngine:
                 {"provider": provider, "model": model, "error": str(exc), "duration_ms": duration_ms})
             raise RuntimeError(f"Reviewer LLM failed: {exc}") from exc
 
+        raw = "".join(text_chunks)
+        thinking = "".join(thinking_chunks)
         duration_ms = round((time.time() - t0) * 1000)
+
         await self._emit(EventType.LLM_CALL_COMPLETED, task.id,
             f"Reviewer responded in {duration_ms}ms — {stats.get('output_tokens', 0)} tokens",
             {"provider": provider, "model": model, "duration_ms": duration_ms, **stats})
@@ -307,8 +346,9 @@ class WorkflowEngine:
             )
         if review.feedback:
             review_content += f"\n\n**Notes:**\n{review.feedback}"
-        self._record("reviewer", "Reviewer (Claude)", review_content, task.id, iteration, "response",
-                     duration_ms=duration_ms, tokens=stats)
+
+        self._record_stream_done("reviewer", "Reviewer (Claude)", stream_id, review_content,
+                                 thinking, task.id, iteration, duration_ms, stats)
         return review
 
     # ── Prompt builders ───────────────────────────────────────────────────────
@@ -369,6 +409,82 @@ class WorkflowEngine:
                 feedback=raw[:2000],
                 iteration=iteration,
             )
+
+    # ── Streaming helpers ─────────────────────────────────────────────────────
+
+    async def _emit_stream_start(
+        self, agent: str, label: str, stream_id: str, task_id: str, iteration: int
+    ) -> None:
+        """Push an empty streaming conversation_entry so the panel bubble appears immediately."""
+        entry = {
+            "agent": agent, "label": label, "content": "", "thinking": "",
+            "task_id": task_id, "iteration": iteration, "type": "response",
+            "timestamp": time.time(), "duration_ms": 0, "tokens": {},
+            "streaming": True, "stream_id": stream_id,
+        }
+        self._log.append(entry)
+        if len(self._log) > 500:
+            self._log.pop(0)
+        try:
+            self._queue.put_nowait(PipelineEvent(
+                type=EventType.CONVERSATION_ENTRY,
+                task_id=task_id,
+                message=label,
+                data={"entry": entry},
+            ))
+        except Exception:
+            pass
+
+    async def _emit_delta(self, stream_id: str, chunk_type: str, text: str, task_id: str) -> None:
+        """Push a conversation_delta event so the frontend can append to the live bubble."""
+        try:
+            self._queue.put_nowait(PipelineEvent(
+                type=EventType.CONVERSATION_DELTA,
+                task_id=task_id,
+                message="",
+                data={"stream_id": stream_id, "chunk_type": chunk_type, "text": text},
+            ))
+        except Exception:
+            pass
+
+    def _record_stream_done(
+        self,
+        agent: str,
+        label: str,
+        stream_id: str,
+        content: str,
+        thinking: str,
+        task_id: str,
+        iteration: int,
+        duration_ms: int,
+        tokens: Optional[dict],
+    ) -> None:
+        """Finalise the streaming entry in the log and push a completed conversation_entry."""
+        # Update the placeholder entry that was added in _emit_stream_start
+        for entry in reversed(self._log):
+            if entry.get("stream_id") == stream_id:
+                entry.update({
+                    "content": content, "thinking": thinking,
+                    "duration_ms": duration_ms, "tokens": tokens or {},
+                    "streaming": False,
+                })
+                break
+
+        final_entry = {
+            "agent": agent, "label": label, "content": content, "thinking": thinking,
+            "task_id": task_id, "iteration": iteration, "type": "response",
+            "timestamp": time.time(), "duration_ms": duration_ms, "tokens": tokens or {},
+            "streaming": False, "stream_id": stream_id,
+        }
+        try:
+            self._queue.put_nowait(PipelineEvent(
+                type=EventType.CONVERSATION_ENTRY,
+                task_id=task_id,
+                message=label,
+                data={"entry": final_entry},
+            ))
+        except Exception:
+            pass
 
     # ── Conversation log ──────────────────────────────────────────────────────
 

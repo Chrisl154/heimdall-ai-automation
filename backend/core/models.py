@@ -97,6 +97,7 @@ class EventType(str, Enum):
     COMMIT_APPROVAL_REQUESTED = "commit_approval_requested"
     COMMIT_APPROVED = "commit_approved"
     COMMIT_DECLINED = "commit_declined"
+    CONVERSATION_DELTA = "conversation_delta"
 
 
 class PipelineEvent(BaseModel):

@@ -25,22 +25,28 @@ const AGENT_COLORS: Record<string, { bg: string; border: string; text: string; d
   reviewer: { bg: "bg-orange-400/10", border: "border-orange-400/20", text: "text-orange-400", dot: "bg-orange-400" },
 };
 
-function AgentBubble({ entry, expanded, onToggle }: {
+function AgentBubble({ entry, expanded, onToggle, thinkingExpanded, onToggleThinking }: {
   entry: ConversationEntry;
   expanded: boolean;
   onToggle: () => void;
+  thinkingExpanded: boolean;
+  onToggleThinking: () => void;
 }) {
   const colors = AGENT_COLORS[entry.agent] ?? AGENT_COLORS.pm;
   const isPrompt = entry.type === "prompt";
   const preview = entry.content.slice(0, 200);
   const hasMore = entry.content.length > 200;
+  const hasThinking = !!(entry.thinking && entry.thinking.length > 0);
 
   return (
     <div className={`rounded-xl border ${colors.bg} ${colors.border} p-3 space-y-1.5`}>
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full shrink-0 ${colors.dot}`} />
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className={`w-2 h-2 rounded-full shrink-0 ${entry.streaming ? `${colors.dot} animate-pulse` : colors.dot}`} />
         <span className={`text-xs font-semibold ${colors.text}`}>{entry.label}</span>
+        {entry.streaming && (
+          <span className="text-[10px] text-blue-400 animate-pulse">streaming…</span>
+        )}
         {entry.iteration > 0 && (
           <span className="text-[10px] text-muted-foreground ml-auto">iter {entry.iteration}</span>
         )}
@@ -55,6 +61,24 @@ function AgentBubble({ entry, expanded, onToggle }: {
         )}
       </div>
 
+      {/* Thinking block (Claude extended thinking) */}
+      {hasThinking && (
+        <div className="border border-orange-400/20 rounded-lg overflow-hidden">
+          <button
+            onClick={onToggleThinking}
+            className="w-full flex items-center gap-1.5 px-2 py-1 bg-orange-400/5 text-[10px] text-orange-400/80 hover:bg-orange-400/10 transition-colors text-left"
+          >
+            {thinkingExpanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+            <span>Thinking ({(entry.thinking!.length / 1000).toFixed(1)}k chars)</span>
+          </button>
+          {thinkingExpanded && (
+            <div className="px-2 py-2 text-[10px] font-mono whitespace-pre-wrap break-words leading-relaxed text-orange-300/70 max-h-64 overflow-y-auto bg-orange-400/5">
+              {entry.thinking}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Content */}
       <div
         className={`text-xs font-mono whitespace-pre-wrap break-words leading-relaxed
@@ -62,9 +86,10 @@ function AgentBubble({ entry, expanded, onToggle }: {
         style={{ maxHeight: expanded ? "none" : "5rem", overflow: expanded ? "visible" : "hidden" }}
       >
         {expanded ? entry.content : preview}
+        {entry.streaming && <span className="inline-block w-1.5 h-3 bg-current ml-0.5 animate-pulse align-middle" />}
       </div>
 
-      {hasMore && (
+      {hasMore && !entry.streaming && (
         <button
           onClick={onToggle}
           className={`flex items-center gap-1 text-[10px] ${colors.text} hover:opacity-80 transition-opacity`}
@@ -159,6 +184,7 @@ export default function ChatPage() {
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [convLoading, setConvLoading] = useState(false);
   const [expanded, setExpanded]       = useState<Record<number, boolean>>({});
+  const [thinkingExpanded, setThinkingExpanded] = useState<Record<number, boolean>>({});
   const [claudeUsage, setClaudeUsage] = useState<ClaudeUsage | null>(null);
   const [pendingCall, setPendingCall] = useState<{ provider: string; model: string; agent: string } | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, ApprovalInfo>>({});
@@ -225,9 +251,28 @@ export default function ChatPage() {
       if (ev.message && !PANEL_ONLY.has(ev.type)) {
         setMessages(prev => [...prev, { role: "event", content: ev.message, time: now() }]);
       }
-      // Live conversation panel — push entries directly
+      // Live conversation panel
       if (ev.type === "conversation_entry" && ev.data?.entry) {
-        setConversation(prev => [...prev, ev.data.entry as ConversationEntry]);
+        const entry = ev.data.entry as ConversationEntry;
+        if (!entry.streaming && entry.stream_id) {
+          // Final entry replacing its streaming placeholder
+          setConversation(prev =>
+            prev.map(e => e.stream_id === entry.stream_id ? entry : e)
+          );
+        } else {
+          setConversation(prev => [...prev, entry]);
+        }
+      }
+      if (ev.type === "conversation_delta" && ev.data?.stream_id) {
+        const { stream_id, chunk_type, text } = ev.data as { stream_id: string; chunk_type: string; text: string };
+        setConversation(prev =>
+          prev.map(e => {
+            if (e.stream_id !== stream_id) return e;
+            return chunk_type === "thinking"
+              ? { ...e, thinking: (e.thinking ?? "") + text }
+              : { ...e, content: e.content + text };
+          })
+        );
       }
       // Track pending LLM call for spinner
       if (ev.type === "llm_call_started") {
@@ -511,10 +556,12 @@ export default function ChatPage() {
               )}
               {conversation.map((entry, i) => (
                 <AgentBubble
-                  key={i}
+                  key={entry.stream_id ?? i}
                   entry={entry}
                   expanded={!!expanded[i]}
                   onToggle={() => setExpanded(p => ({ ...p, [i]: !p[i] }))}
+                  thinkingExpanded={!!thinkingExpanded[i]}
+                  onToggleThinking={() => setThinkingExpanded(p => ({ ...p, [i]: !p[i] }))}
                 />
               ))}
               {pendingCall && (
