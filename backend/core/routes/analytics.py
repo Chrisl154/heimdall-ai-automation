@@ -5,13 +5,13 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from core.task_manager import TaskManager
+from core.task_manager import get_task_manager
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 
 def _compute_stats() -> dict[str, Any]:
-    mgr = TaskManager()
+    mgr = get_task_manager()
     tasks = mgr.list_tasks()
 
     total_tasks = len(tasks)

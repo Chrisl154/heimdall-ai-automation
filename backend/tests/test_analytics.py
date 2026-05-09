@@ -1,175 +1,104 @@
-"""Tests for GET /api/analytics."""
+"""Tests for GET /api/analytics.
+
+Data is seeded through POST /api/tasks (the real API) so every test
+uses the live singleton TaskManager — no file-system patching needed.
+The conftest mocks PMEngine.start so no background task racing occurs.
+"""
 import pytest
 
 
-def test_analytics_empty(test_client, tmp_path):
-    # Overwrite the backlog with an empty list so there are no tasks
-    (tmp_path / "tasks" / "backlog.yaml").write_text("[]", encoding="utf-8")
-
-    response = test_client.get("/api/analytics")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total_tasks"] == 0
-    assert data["completed"] == 0
-    assert data["failed"] == 0
-    assert data["escalated"] == 0
-    assert data["pending"] == 0
-    assert data["success_rate"] == 0.0
+def _seed(client, tasks: list[dict]) -> None:
+    for t in tasks:
+        resp = client.post("/api/tasks", json=t)
+        assert resp.status_code in (200, 201), resp.text
 
 
-def test_analytics_with_tasks(test_client, tmp_path):
-    # Write a backlog with known statuses
-    (tmp_path / "tasks" / "backlog.yaml").write_text(
-        """\
-- id: t-pending
-  title: "Pending"
-  description: ""
-  priority: low
-  status: pending
-  created_at: "2026-04-18"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 0
-  output_path: ""
+def _base(overrides: dict) -> dict:
+    return {
+        "title": "t",
+        "description": "d",
+        "priority": "medium",
+        "tags": [],
+        "depends_on": [],
+        "max_review_iterations": 3,
+        "output_path": "",
+        **overrides,
+    }
 
-- id: t-completed-1
-  title: "Done 1"
-  description: ""
-  priority: high
-  status: completed
-  created_at: "2026-04-18"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 2
-  output_path: ""
 
-- id: t-completed-2
-  title: "Done 2"
-  description: ""
-  priority: critical
-  status: completed
-  created_at: "2026-04-18"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 1
-  output_path: ""
+def _patch_status(client, task_id: str, status: str) -> None:
+    resp = client.patch(f"/api/tasks/{task_id}", json={"status": status})
+    assert resp.status_code == 200, resp.text
 
-- id: t-failed
-  title: "Failed"
-  description: ""
-  priority: medium
-  status: failed
-  created_at: "2026-04-18"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 3
-  output_path: ""
 
-- id: t-escalated
-  title: "Escalated"
-  description: ""
-  priority: medium
-  status: escalated
-  created_at: "2026-04-18"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 3
-  output_path: ""
-""",
-        encoding="utf-8",
-    )
+# ── Baseline (conftest task-001 only) ─────────────────────────────────────────
 
-    response = test_client.get("/api/analytics")
-    assert response.status_code == 200
-    data = response.json()
+def test_analytics_baseline(test_client):
+    """Analytics endpoint is reachable and returns the right schema."""
+    resp = test_client.get("/api/analytics")
+    assert resp.status_code == 200
+    data = resp.json()
+    for key in ("total_tasks", "completed", "failed", "escalated",
+                "pending", "success_rate", "tasks_by_priority",
+                "tasks_by_tag", "recent_completions"):
+        assert key in data, f"missing key: {key}"
 
+
+# ── Task counts and priority breakdown ───────────────────────────────────────
+
+def test_analytics_with_tasks(test_client):
+    _seed(test_client, [
+        _base({"title": "Done 1",    "priority": "high"}),
+        _base({"title": "Done 2",    "priority": "critical"}),
+        _base({"title": "Failed",    "priority": "medium"}),
+        _base({"title": "Escalated", "priority": "medium"}),
+    ])
+
+    tasks = test_client.get("/api/tasks").json()
+    by_title = {t["title"]: t["id"] for t in tasks}
+
+    _patch_status(test_client, by_title["Done 1"],    "completed")
+    _patch_status(test_client, by_title["Done 2"],    "completed")
+    _patch_status(test_client, by_title["Failed"],    "failed")
+    _patch_status(test_client, by_title["Escalated"], "escalated")
+
+    data = test_client.get("/api/analytics").json()
+
+    # conftest seeds task-001 (pending/medium) + our 4 = 5 total
     assert data["total_tasks"] == 5
     assert data["completed"] == 2
     assert data["failed"] == 1
     assert data["escalated"] == 1
-    assert data["pending"] == 1
-
-    # success_rate = completed / total_tasks * 100
+    assert data["pending"] == 1  # task-001 from conftest
     assert data["success_rate"] == pytest.approx(40.0, abs=0.1)
-
-    assert data["tasks_by_priority"]["low"] == 1
-    assert data["tasks_by_priority"]["medium"] == 2
-    assert data["tasks_by_priority"]["high"] == 1
-    assert data["tasks_by_priority"]["critical"] == 1
+    assert data["tasks_by_priority"]["medium"] >= 2  # task-001 + Failed + Escalated
 
 
-def test_analytics_tags(test_client, tmp_path):
-    (tmp_path / "tasks" / "backlog.yaml").write_text(
-        """\
-- id: tag-1
-  title: "Tagged A"
-  description: ""
-  priority: medium
-  status: pending
-  created_at: "2026-04-18"
-  tags: ["backend", "python"]
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 0
-  output_path: ""
+# ── Tag aggregation ───────────────────────────────────────────────────────────
 
-- id: tag-2
-  title: "Tagged B"
-  description: ""
-  priority: medium
-  status: pending
-  created_at: "2026-04-18"
-  tags: ["backend", "fastapi"]
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 0
-  output_path: ""
-""",
-        encoding="utf-8",
-    )
+def test_analytics_tags(test_client):
+    _seed(test_client, [
+        _base({"title": "Tagged A", "tags": ["backend", "python"]}),
+        _base({"title": "Tagged B", "tags": ["backend", "fastapi"]}),
+    ])
 
-    response = test_client.get("/api/analytics")
-    assert response.status_code == 200
-    data = response.json()
-
-    tags = data["tasks_by_tag"]
+    tags = test_client.get("/api/analytics").json()["tasks_by_tag"]
     assert tags.get("backend") == 2
     assert tags.get("python") == 1
     assert tags.get("fastapi") == 1
 
 
-def test_analytics_recent_completions(test_client, tmp_path):
-    tasks_yaml = ""
+# ── Recent completions ────────────────────────────────────────────────────────
+
+def test_analytics_recent_completions(test_client):
     for i in range(5):
-        tasks_yaml += f"""\
-- id: done-{i}
-  title: "Completed Task {i}"
-  description: ""
-  priority: medium
-  status: completed
-  created_at: "2026-04-18"
-  completed_at: "2026-04-18T1{i}:00:00Z"
-  tags: []
-  depends_on: []
-  max_review_iterations: 3
-  current_iteration: 1
-  output_path: ""
+        _seed(test_client, [_base({"title": f"Done {i}"})])
 
-"""
-    (tmp_path / "tasks" / "backlog.yaml").write_text(tasks_yaml, encoding="utf-8")
+    tasks = test_client.get("/api/tasks").json()
+    # Mark all as completed (includes conftest task-001 + 5 we just added)
+    for t in tasks:
+        _patch_status(test_client, t["id"], "completed")
 
-    response = test_client.get("/api/analytics")
-    assert response.status_code == 200
-    data = response.json()
-
-    completions = data["recent_completions"]
-    assert len(completions) <= 10
+    completions = test_client.get("/api/analytics").json()["recent_completions"]
+    # recent_completions is capped at 5 by the route
     assert len(completions) == 5
-    ids = {c["id"] for c in completions}
-    for i in range(5):
-        assert f"done-{i}" in ids

@@ -115,6 +115,7 @@ def test_client(monkeypatch, tmp_path):
     with (
         patch("core.messaging.manager.MessagingManager.start_all", new=AsyncMock()),
         patch("core.messaging.manager.MessagingManager.stop_all", new=AsyncMock()),
+        patch("core.pm_engine.PMEngine.start", new=AsyncMock()),
         patch("core.pm_engine.PMEngine.stop", new=AsyncMock()),
     ):
         from main import app
